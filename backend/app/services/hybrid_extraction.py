@@ -5,6 +5,11 @@ from langchain_openai import ChatOpenAI
 from app.core.config import settings
 
 # --- Pydantic Models (Matching existing ones) ---
+class CleanedMessage(BaseModel):
+    sender: str
+    message: str
+    timestamp: Optional[str] = None
+
 class ExtractedContact(BaseModel):
     name: str = Field(description="Full name of the person")
     email: Optional[str] = Field(None, description="Email address if found")
@@ -42,10 +47,7 @@ ZOOM_MSG_PATTERN = re.compile(r'(?:\d{4}-\d{2}-\d{2}\s+)?\d{2}:\d{2}:\d{2}\s+Fro
 OFFER_KEYWORDS = ["offering", "provide", "fund", "lender", "investor", "tc", "coordinator", "service", "help you", "capital", "available"]
 REQUEST_KEYWORDS = ["looking for", "need", "seeking", "anyone doing", "who has", "connect with", "iso", "searching"]
 
-class CleanedMessage(BaseModel):
-    sender: str
-    message: str
-    timestamp: Optional[str] = None
+
 
 def clean_description(text: str) -> str:
     """Removes URLs and extra whitespace for a cleaner description."""
