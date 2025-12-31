@@ -1,5 +1,5 @@
 import re
-from typing import List, Dict, Set, Optional
+from typing import List, Dict, Set, Optional, Tuple
 from pydantic import BaseModel, Field
 from langchain_openai import ChatOpenAI
 from app.core.config import settings
@@ -45,7 +45,7 @@ def clean_description(text: str) -> str:
     text = re.sub(URL_REGEX, '', text)
     return text.strip()
 
-def extract_contacts_and_services(text: str) -> md_data:
+def extract_contacts_and_services(text: str) -> Tuple[List[ExtractedContact], List[ExtractedService]]:
     """
     Pass 1: Deterministic Parsing
     """
