@@ -6,7 +6,12 @@ from app.schemas import ContactBase, ServiceBase, ExtractedData
 def clean_text(text: str) -> str:
     # Simple cleaning: remove excessive whitespace, null bytes
     text = text.replace("\x00", "")
-    return re.sub(r'\s+', ' ', text).strip()
+    # Remove multiple spaces but KEEP newlines
+    # 1. Replace multiple spaces/tabs within a line
+    text = re.sub(r'[ \t]+', ' ', text)
+    # 2. Normalize newlines (remove empty lines if desired, or just collapse multiple \n)
+    text = re.sub(r'\n\s*\n', '\n', text) 
+    return text.strip()
 
 def compute_hash(text: str) -> str:
     return hashlib.sha256(text.encode('utf-8')).hexdigest()
