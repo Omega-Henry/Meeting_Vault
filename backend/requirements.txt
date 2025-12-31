@@ -1,0 +1,10 @@
+fastapi
+uvicorn[standard]
+python-multipart
+pydantic-settings
+supabase
+langchain
+langgraph
+langchain-openai
+python-jose[cryptography]
+httpx
