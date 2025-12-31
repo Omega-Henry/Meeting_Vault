@@ -51,15 +51,25 @@ def extract_meeting_data(text: str) -> ExtractedMeetingData:
     prompt = f"""
     You are an expert data extractor. Analyze the following meeting chat transcript.
     
-    Extract:
-    1. All participants as Contacts. Try to infer names from the "From Name to Everyone:" pattern.
-    2. All "Offers" (services/products people are selling/providing) and "Requests" (what people are looking for).
-       - CLEAN the description: Remove timestamps (e.g. "09:26:10"), sender names, and "From X to Everyone:".
-       - Attribute each service to the correct Contact Name.
-    3. A brief summary of the meeting and key topics.
+    The transcript follows the pattern: "HH:MM:SS From Sender Name to Everyone: Message content"
+    
+    Your Goal: Extract structured data about Offers (services/products provided) and Requests (needs).
+    
+    Rules:
+    1. **Identify Offers and Requests**: Look for people offering services, sharing links to their work, or asking for help/connections.
+    2. **Extract Contact Names**:
+       - For *every* Offer or Request, identifying the "Sender Name" is CRITICAL.
+       - Extract the name EXACTLY as it appears in the "From [Name] to Everyone" pattern, even if it looks like a nickname or company name (e.g., "Commish", "John Doe", "Tech Support").
+       - If the name is missing or clearly a system message, use "Unattributed".
+    3. **Filter Contacts**:
+       - **ONLY** include Contacts in the output if they have at least one Offer or Request.
+       - Do not include participants who just said "Hello" or "Thanks" without an offer/request.
+    4. **Clean Descriptions**:
+       - Remove timestamps and "From X to Everyone" from the description.
+       - Keep it concise.
     
     Transcript:
-    {text[:15000]}  # Truncate to avoid token limits if necessary, though 15k chars is usually fine for 4o-mini
+    {text[:15000]}
     """
     
     return structured_llm.invoke(prompt)
