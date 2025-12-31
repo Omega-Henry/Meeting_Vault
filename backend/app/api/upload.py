@@ -2,7 +2,7 @@ from fastapi import APIRouter, UploadFile, File, Depends, HTTPException, status
 from supabase import Client
 from app.dependencies import get_supabase_client, get_current_user
 from app.services.ingestion import clean_text, compute_hash
-from app.services.llm_extraction import extract_meeting_data
+from app.services.hybrid_extraction import extract_meeting_data
 from app.schemas import MeetingChatResponse
 import json
 
