@@ -12,15 +12,9 @@ async def delete_chat(
 ):
     user_id = user.id
     
-    # Verify ownership
-    res = client.table("meeting_chats").select("id").eq("id", chat_id).eq("user_id", user_id).execute()
-    if not res.data:
-        raise HTTPException(status_code=404, detail="Chat not found or access denied")
-        
-    # Delete associated services manually since we have ON DELETE SET NULL in schema (oops)
-    # Ideally we should have ON DELETE CASCADE. 
-    # But we can just delete them here.
-    client.table("services").delete().eq("meeting_chat_id", chat_id).execute()
+    # Delete the chat
+    # We rely on ON DELETE CASCADE in the database to remove services.
+    # User must run: ALTER TABLE services DROP CONSTRAINT services_meeting_chat_id_fkey; ...
     
     # Delete the chat
     client.table("meeting_chats").delete().eq("id", chat_id).execute()

@@ -75,7 +75,7 @@ create table public.services (
   id uuid primary key default gen_random_uuid(),
   user_id uuid not null references auth.users(id),
   contact_id uuid not null references public.contacts(id) on delete cascade,
-  meeting_chat_id uuid null references public.meeting_chats(id) on delete set null,
+  meeting_chat_id uuid null references public.meeting_chats(id) on delete cascade,
   type text not null check (type in ('offer', 'request')),
   description text not null,
   links jsonb null,
