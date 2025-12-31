@@ -9,7 +9,7 @@ export default function ChatDetail() {
     const [chat, setChat] = useState<any>(null)
     const [services, setServices] = useState<any[]>([])
     const [loading, setLoading] = useState(true)
-    const [showTranscript, setShowTranscript] = useState(false)
+    const [showTranscript, setShowTranscript] = useState<'cleaned' | 'raw' | null>('cleaned')
     const [isEditingTitle, setIsEditingTitle] = useState(false)
     const [newTitle, setNewTitle] = useState('')
 
@@ -174,22 +174,53 @@ export default function ChatDetail() {
                 </div>
             </div>
 
-            {/* Transcript Toggle */}
-            <div className="border rounded-lg overflow-hidden">
-                <button
-                    onClick={() => setShowTranscript(!showTranscript)}
-                    className="w-full flex items-center justify-between p-4 bg-muted/50 hover:bg-muted transition-colors"
-                >
-                    <span className="font-medium">Full Transcript</span>
-                    {showTranscript ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
-                </button>
-                {showTranscript && (
-                    <div className="p-4 bg-card border-t overflow-x-auto">
-                        <pre className="whitespace-pre-wrap text-sm font-mono text-muted-foreground">
-                            {chat.cleaned_text}
-                        </pre>
-                    </div>
-                )}
+            {/* Cleaned Transcript / Full Transcript Toggles */}
+            <div className="space-y-4">
+                {/* Cleaned Transcript */}
+                <div className="border rounded-lg overflow-hidden">
+                    <button
+                        onClick={() => setShowTranscript(showTranscript === 'cleaned' ? null : 'cleaned')}
+                        className="w-full flex items-center justify-between p-4 bg-muted/50 hover:bg-muted transition-colors"
+                    >
+                        <span className="font-medium flex items-center">
+                            <Check className="h-4 w-4 mr-2 text-green-600" />
+                            Cleaned Transcript
+                        </span>
+                        {showTranscript === 'cleaned' ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+                    </button>
+                    {showTranscript === 'cleaned' && (
+                        <div className="p-4 bg-card border-t max-h-[600px] overflow-y-auto space-y-3">
+                            {chat.cleaned_transcript && chat.cleaned_transcript.length > 0 ? (
+                                chat.cleaned_transcript.map((msg: any, i: number) => (
+                                    <div key={i} className="flex flex-col text-sm border-b pb-2 last:border-0">
+                                        <span className="font-semibold text-primary">{msg.sender}</span>
+                                        <span className="text-foreground/90 whitespace-pre-wrap">{msg.message}</span>
+                                    </div>
+                                ))
+                            ) : (
+                                <p className="text-muted-foreground italic">No cleaned transcript available.</p>
+                            )}
+                        </div>
+                    )}
+                </div>
+
+                {/* Raw Transcript */}
+                <div className="border rounded-lg overflow-hidden">
+                    <button
+                        onClick={() => setShowTranscript(showTranscript === 'raw' ? null : 'raw')}
+                        className="w-full flex items-center justify-between p-4 bg-muted/50 hover:bg-muted transition-colors"
+                    >
+                        <span className="font-medium">Raw Transcript</span>
+                        {showTranscript === 'raw' ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+                    </button>
+                    {showTranscript === 'raw' && (
+                        <div className="p-4 bg-card border-t overflow-x-auto">
+                            <pre className="whitespace-pre-wrap text-sm font-mono text-muted-foreground">
+                                {chat.cleaned_text}
+                            </pre>
+                        </div>
+                    )}
+                </div>
             </div>
         </div>
     )

@@ -9,6 +9,7 @@ create table public.meeting_chats (
   meeting_name text not null,
   chat_hash text not null,
   cleaned_text text not null,
+  cleaned_transcript jsonb null, -- Structured transcript (Sender, Message)
   digest_bullets jsonb null,
   created_at timestamptz not null default now()
 );

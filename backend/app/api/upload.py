@@ -63,7 +63,8 @@ async def upload_meeting_chat(
     if extracted_data:
         # Update meeting with summary
         client.table("meeting_chats").update({
-            "digest_bullets": extracted_data.summary.model_dump()
+            "digest_bullets": extracted_data.summary.model_dump(),
+            "cleaned_transcript": [m.model_dump() for m in extracted_data.cleaned_transcript]
         }).eq("id", chat_id).execute()
 
         # Process Contacts

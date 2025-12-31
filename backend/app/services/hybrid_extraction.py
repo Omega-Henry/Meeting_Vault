@@ -25,6 +25,7 @@ class ExtractedMeetingData(BaseModel):
     contacts: List[ExtractedContact]
     services: List[ExtractedService]
     summary: MeetingSummary
+    cleaned_transcript: List[CleanedMessage] = Field(default_factory=list, description="Structured parsed messages")
     
 # --- Regex Patterns ---
 PHONE_REGEX = r'\(?\d{3}\)?[\s.-]?\d{3}[\s.-]?\d{4}'
@@ -33,11 +34,18 @@ URL_REGEX = r'(https?://[^\s]+)'
 
 # Zoom Pattern: HH:MM:SS From [Name] to Everyone: [Message]
 # Regex to capture Name and Message. Ignore Timestamp.
-ZOOM_MSG_PATTERN = re.compile(r'\d{2}:\d{2}:\d{2}\s+From\s+(.+?)\s+to\s+Everyone:\s+(.*)', re.IGNORECASE)
+# Zoom Pattern: Optional Date + Time + From [Name] to Everyone: [Message]
+# Matches: "09:00:00 From Bob to Everyone: Hello" AND "2025-12-31 09:00:00 From Bob to Everyone: Hello"
+ZOOM_MSG_PATTERN = re.compile(r'(?:\d{4}-\d{2}-\d{2}\s+)?\d{2}:\d{2}:\d{2}\s+From\s+(.+?)\s+to\s+Everyone:\s+(.*)', re.IGNORECASE)
 
 # Keywords
 OFFER_KEYWORDS = ["offering", "provide", "fund", "lender", "investor", "tc", "coordinator", "service", "help you", "capital", "available"]
 REQUEST_KEYWORDS = ["looking for", "need", "seeking", "anyone doing", "who has", "connect with", "iso", "searching"]
+
+class CleanedMessage(BaseModel):
+    sender: str
+    message: str
+    timestamp: Optional[str] = None
 
 def clean_description(text: str) -> str:
     """Removes URLs and extra whitespace for a cleaner description."""
@@ -45,7 +53,7 @@ def clean_description(text: str) -> str:
     text = re.sub(URL_REGEX, '', text)
     return text.strip()
 
-def extract_contacts_and_services(text: str) -> Tuple[List[ExtractedContact], List[ExtractedService]]:
+def extract_contacts_and_services(text: str) -> Tuple[List[ExtractedContact], List[ExtractedService], List[CleanedMessage]]:
     """
     Pass 1: Deterministic Parsing
     """
@@ -53,6 +61,7 @@ def extract_contacts_and_services(text: str) -> Tuple[List[ExtractedContact], Li
     
     contacts_map: Dict[str, Dict] = {} # Name -> {email, phone, role, set(links)}
     services_list: List[ExtractedService] = []
+    cleaned_messages: List[CleanedMessage] = []
     
     for line in lines:
         match = ZOOM_MSG_PATTERN.search(line)
@@ -61,6 +70,9 @@ def extract_contacts_and_services(text: str) -> Tuple[List[ExtractedContact], Li
             
         sender_name = match.group(1).strip()
         message = match.group(2).strip()
+        
+        # Add to cleaned transcript
+        cleaned_messages.append(CleanedMessage(sender=sender_name, message=message))
         
         # 1. Initialize Contact if new
         if sender_name not in contacts_map:
@@ -121,7 +133,7 @@ def extract_contacts_and_services(text: str) -> Tuple[List[ExtractedContact], Li
              ))
 
     # Create dummy summary holder (will be filled by LLM)
-    return final_contacts, services_list
+    return final_contacts, services_list, cleaned_messages
 
 def extract_summary_with_llm(text: str) -> MeetingSummary:
     """
@@ -157,7 +169,7 @@ def extract_summary_with_llm(text: str) -> MeetingSummary:
 
 def extract_meeting_data(text: str) -> ExtractedMeetingData:
     # Pass 1: Deterministic
-    contacts, services = extract_contacts_and_services(text)
+    contacts, services, cleaned_transcript = extract_contacts_and_services(text)
     
     # Pass 2: LLM
     summary_data = extract_summary_with_llm(text)
@@ -165,5 +177,6 @@ def extract_meeting_data(text: str) -> ExtractedMeetingData:
     return ExtractedMeetingData(
         contacts=contacts,
         services=services,
-        summary=summary_data
+        summary=summary_data,
+        cleaned_transcript=cleaned_transcript
     )
