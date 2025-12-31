@@ -189,14 +189,11 @@ export default function ChatDetail() {
                         {showTranscript === 'cleaned' ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
                     </button>
                     {showTranscript === 'cleaned' && (
-                        <div className="p-4 bg-card border-t max-h-[600px] overflow-y-auto space-y-3">
+                        <div className="p-4 bg-card border-t max-h-[600px] overflow-y-auto">
                             {chat.cleaned_transcript && chat.cleaned_transcript.length > 0 ? (
-                                chat.cleaned_transcript.map((msg: any, i: number) => (
-                                    <div key={i} className="flex flex-col text-sm border-b pb-2 last:border-0">
-                                        <span className="font-semibold text-primary">{msg.sender}</span>
-                                        <span className="text-foreground/90 whitespace-pre-wrap">{msg.message}</span>
-                                    </div>
-                                ))
+                                <pre className="whitespace-pre-wrap text-sm font-mono text-foreground/90">
+                                    {chat.cleaned_transcript.map((msg: any) => `${msg.sender}: ${msg.message}`).join('\n')}
+                                </pre>
                             ) : (
                                 <p className="text-muted-foreground italic">No cleaned transcript available.</p>
                             )}

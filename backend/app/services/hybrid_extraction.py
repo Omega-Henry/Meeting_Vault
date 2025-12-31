@@ -41,7 +41,9 @@ URL_REGEX = r'(https?://[^\s]+)'
 # Regex to capture Name and Message. Ignore Timestamp.
 # Zoom Pattern: Optional Date + Time + From [Name] to Everyone: [Message]
 # Matches: "09:00:00 From Bob to Everyone: Hello" AND "2025-12-31 09:00:00 From Bob to Everyone: Hello"
-ZOOM_MSG_PATTERN = re.compile(r'(?:\d{4}-\d{2}-\d{2}\s+)?\d{2}:\d{2}:\d{2}\s+From\s+(.+?)\s+to\s+Everyone:\s+(.*)', re.IGNORECASE)
+# Zoom Pattern: Find "From <Name> to Everyone: <Message>"
+# We use a permissive start (.*?) to skip over timestamps regardless of format
+ZOOM_MSG_PATTERN = re.compile(r'.*?From\s+(.+?)\s+to\s+Everyone:\s+(.*)', re.IGNORECASE)
 
 # Keywords
 OFFER_KEYWORDS = ["offering", "provide", "fund", "lender", "investor", "tc", "coordinator", "service", "help you", "capital", "available"]
@@ -73,8 +75,16 @@ def extract_contacts_and_services(text: str) -> Tuple[List[ExtractedContact], Li
         sender_name = match.group(1).strip()
         message = match.group(2).strip()
         
-        # Add to cleaned transcript
-        cleaned_messages.append(CleanedMessage(sender=sender_name, message=message))
+        # Add to cleaned transcript ONLY if it's not noise
+        # Noise filter: very short messages, or specific keywords
+        is_noise = False
+        if len(message) < 3 and message.lower() in ["hi", "hey", "yes", "no", "ok", "yep", "lol", "thx"]:
+            is_noise = True
+        if len(message.strip()) == 0:
+            is_noise = True
+            
+        if not is_noise:
+            cleaned_messages.append(CleanedMessage(sender=sender_name, message=message))
         
         # 1. Initialize Contact if new
         if sender_name not in contacts_map:
