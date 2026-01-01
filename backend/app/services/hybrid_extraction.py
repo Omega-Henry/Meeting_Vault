@@ -1,11 +1,16 @@
 import re
+import logging
 from typing import List, Dict, Set, Optional, Tuple
 from pydantic import BaseModel, Field
 from langchain_openai import ChatOpenAI
 from app.core.config import settings
 
-# --- Pydantic Models (Matching existing ones) ---
+# --- Logging ---
+logger = logging.getLogger(__name__)
+
+# --- Pydantic Models ---
 class CleanedMessage(BaseModel):
+    id: int = Field(description="Index of the message")
     sender: str
     message: str
     timestamp: Optional[str] = None
@@ -18,7 +23,7 @@ class ExtractedContact(BaseModel):
 
 class ExtractedService(BaseModel):
     type: str = Field(description="Either 'offer' or 'request'")
-    description: str = Field(description="Concise description")
+    description: str = Field(description="Concise description of the offer or request")
     contact_name: str = Field(description="Name of the person associated with this service")
     links: List[str] = Field(default_factory=list, description="URLs mentioned")
 
@@ -26,169 +31,175 @@ class MeetingSummary(BaseModel):
     summary: str = Field(description="A concise summary of the meeting discussion (3-5 sentences).")
     key_topics: List[str] = Field(description="List of key topics discussed.")
 
+class IntentAnalysis(BaseModel):
+    services: List[ExtractedService] = Field(description="List of extracted offers and requests")
+    noise_message_ids: List[int] = Field(description="List of message IDs (indices) that are irrelevant noise, jokes, or pure chatter")
+
 class ExtractedMeetingData(BaseModel):
     contacts: List[ExtractedContact]
     services: List[ExtractedService]
     summary: MeetingSummary
-    cleaned_transcript: List[CleanedMessage] = Field(default_factory=list, description="Structured parsed messages")
-    
+    cleaned_transcript: List[CleanedMessage] = Field(default_factory=list, description="Structured parsed messages (filtered)")
+
 # --- Regex Patterns ---
 PHONE_REGEX = r'\(?\d{3}\)?[\s.-]?\d{3}[\s.-]?\d{4}'
 EMAIL_REGEX = r'[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}'
 URL_REGEX = r'(https?://[^\s]+)'
 
-# Zoom Pattern: HH:MM:SS From [Name] to Everyone: [Message]
-# Regex to capture Name and Message. Ignore Timestamp.
 # Zoom Pattern: Optional Date + Time + From [Name] to Everyone: [Message]
-# Matches: "09:00:00 From Bob to Everyone: Hello" AND "2025-12-31 09:00:00 From Bob to Everyone: Hello"
-# Zoom Pattern: Find "From <Name> to Everyone: <Message>"
-# We use a permissive start (.*?) to skip over timestamps regardless of format
-ZOOM_MSG_PATTERN = re.compile(r'.*?From\s+(.+?)\s+to\s+Everyone:\s+(.*)', re.IGNORECASE)
-
-# Keywords
-OFFER_KEYWORDS = ["offering", "provide", "fund", "lender", "investor", "tc", "coordinator", "service", "help you", "capital", "available"]
-REQUEST_KEYWORDS = ["looking for", "need", "seeking", "anyone doing", "who has", "connect with", "iso", "searching"]
-
-
+ZOOM_MSG_PATTERN = re.compile(r'(?:\d{4}-\d{2}-\d{2}\s+)?\d{2}:\d{2}:\d{2}\s+From\s+(.+?)\s+to\s+Everyone:\s+(.*)', re.IGNORECASE)
 
 def clean_description(text: str) -> str:
-    """Removes URLs and extra whitespace for a cleaner description."""
-    # Remove URLs
+    """Removes URLs and extra whitespace."""
     text = re.sub(URL_REGEX, '', text)
     return text.strip()
 
-def extract_contacts_and_services(text: str) -> Tuple[List[ExtractedContact], List[ExtractedService], List[CleanedMessage]]:
-    """
-    Pass 1: Deterministic Parsing
-    """
+def parse_transcript_lines(text: str) -> List[CleanedMessage]:
+    """Parses raw text into structured messages."""
     lines = text.split('\n')
-    
-    contacts_map: Dict[str, Dict] = {} # Name -> {email, phone, role, set(links)}
-    services_list: List[ExtractedService] = []
-    cleaned_messages: List[CleanedMessage] = []
-    
+    parsed = []
+    idx = 0
     for line in lines:
         match = ZOOM_MSG_PATTERN.search(line)
-        if not match:
-            continue
-            
-        sender_name = match.group(1).strip()
-        message = match.group(2).strip()
+        if match:
+            sender = match.group(1).strip()
+            msg = match.group(2).strip()
+            parsed.append(CleanedMessage(id=idx, sender=sender, message=msg))
+            idx += 1
+    return parsed
+
+def extract_hard_contact_info(messages: List[CleanedMessage]) -> Dict[str, Dict]:
+    """Pass 1: Regex extraction of Phone, Email, Links from structured messages."""
+    contacts_map: Dict[str, Dict] = {} # Name -> {email, phone, links}
+
+    for m in messages:
+        sender = m.sender
+        text = m.message
         
-        # Add to cleaned transcript ONLY if it's not noise
-        # Noise filter: very short messages, or specific keywords
-        is_noise = False
-        if len(message) < 3 and message.lower() in ["hi", "hey", "yes", "no", "ok", "yep", "lol", "thx"]:
-            is_noise = True
-        if len(message.strip()) == 0:
-            is_noise = True
-            
-        if not is_noise:
-            cleaned_messages.append(CleanedMessage(sender=sender_name, message=message))
+        if sender not in contacts_map:
+            contacts_map[sender] = {"email": None, "phone": None, "links": set()}
+
+        # Check combined text (Name + Message)
+        combined = f"{sender} {text}"
         
-        # 1. Initialize Contact if new
-        if sender_name not in contacts_map:
-            contacts_map[sender_name] = {"email": None, "phone": None, "links": set()}
-        
-        # 2. Extract Hard Data (Phone, Email, URL) from Message AND Name
-        # Check Name string for info (sometimes people put phone in name)
-        combined_text = f"{sender_name} {message}"
-        
-        phones = re.findall(PHONE_REGEX, combined_text)
-        emails = re.findall(EMAIL_REGEX, combined_text)
-        urls = re.findall(URL_REGEX, combined_text)
-        
-        # Update Contact Info (Simple aggregation: take first found or overwrite)
-        if phones:
-            contacts_map[sender_name]["phone"] = phones[0] # Take first valid phone found
-        if emails:
-            contacts_map[sender_name]["email"] = emails[0] # Take first valid email
-        
-        # Collect links
+        phones = re.findall(PHONE_REGEX, combined)
+        emails = re.findall(EMAIL_REGEX, combined)
+        urls = re.findall(URL_REGEX, combined)
+
+        if phones and not contacts_map[sender]["phone"]:
+            contacts_map[sender]["phone"] = phones[0]
+        if emails and not contacts_map[sender]["email"]:
+            contacts_map[sender]["email"] = emails[0]
         for url in urls:
-            contacts_map[sender_name]["links"].add(url)
+            contacts_map[sender]["links"].add(url)
             
-        # 3. Intent Classification (Service Extraction)
-        msg_lower = message.lower()
-        
-        service_type = None
-        if any(k in msg_lower for k in OFFER_KEYWORDS):
-            service_type = "offer"
-        elif any(k in msg_lower for k in REQUEST_KEYWORDS):
-            service_type = "request"
-            
-        if service_type:
-            # Create Service entry
-            # Prioritize clean description
-            desc = clean_description(message)
-            if len(desc) > 5: # Ignore very short messages
-                services_list.append(ExtractedService(
-                    type=service_type,
-                    description=desc,
-                    contact_name=sender_name,
-                    links=list(set(urls)) # Attach links found in this specific message
-                ))
+    return contacts_map
 
-    # Convert map to list of ExtractedContact
-    final_contacts = []
-    for name, info in contacts_map.items():
-        # Only include if they have a service output OR useful contact info (email/phone)
-        has_service = any(s.contact_name == name for s in services_list)
-        has_contact_info = info["email"] or info["phone"] or info["links"]
-        
-        if has_service or has_contact_info:
-             final_contacts.append(ExtractedContact(
-                 name=name,
-                 email=info["email"],
-                 phone=info["phone"],
-                 role=None # Hard to regex, leave empty or infer later
-             ))
-
-    # Create dummy summary holder (will be filled by LLM)
-    return final_contacts, services_list, cleaned_messages
-
-def extract_summary_with_llm(text: str) -> MeetingSummary:
-    """
-    Pass 2: LLM for Summary only.
-    """
+def analyze_with_llm(messages: List[CleanedMessage]) -> IntentAnalysis:
+    """Pass 2: LLM Intent Analysis."""
     if not settings.OPENROUTER_API_KEY:
-        return MeetingSummary(summary="No API Key provided for summary.", key_topics=[])
+        logger.warning("No API Key found. Skipping LLM analysis.")
+        return IntentAnalysis(services=[], noise_message_ids=[])
 
     try:
-        api_key = settings.OPENROUTER_API_KEY
-        base_url = settings.OPENROUTER_BASE_URL
-        
         llm = ChatOpenAI(
             model=settings.LLM_MODEL,
-            api_key=api_key,
-            base_url=base_url,
+            api_key=settings.OPENROUTER_API_KEY,
+            base_url=settings.OPENROUTER_BASE_URL,
+            temperature=0
+        )
+        structured_llm = llm.with_structured_output(IntentAnalysis)
+
+        # Prepare a concise version for LLM to save tokens
+        transcript_text = "\n".join([f"[{m.id}] {m.sender}: {m.message}" for m in messages[:600]]) # Limit to ~600 messages for safety
+
+        prompt = f"""
+        You are an expert meeting assistant. Analyze the following Zoom chat transcript.
+        
+        Task 1: Extract all "Offers" and "Requests".
+        - Offer: Someone offering a service, funding, help, or resource.
+        - Request: Someone looking for a service, connection, or help.
+        - For each, provide a clear description and the Sender's Name.
+        
+        Task 2: Identify "Noise".
+        - Identify message IDs (numbers in brackets) that are pure noise, jokes, simple greetings ("hi"), or irrelevant chatter.
+        - Keep messages that provide context to offers/requests.
+        
+        Transcript:
+        {transcript_text}
+        """
+        
+        logger.info("Sending transcript to LLM for Intent Analysis...")
+        result = structured_llm.invoke(prompt)
+        logger.info(f"LLM Analysis Complete. Found {len(result.services)} services and {len(result.noise_message_ids)} noise items.")
+        return result
+
+    except Exception as e:
+        logger.error(f"LLM Intent Analysis Failed: {e}")
+        return IntentAnalysis(services=[], noise_message_ids=[])
+
+def extract_summary_with_llm(text: str) -> MeetingSummary:
+    """Pass 3: Summary Generation."""
+    if not settings.OPENROUTER_API_KEY:
+        return MeetingSummary(summary="No API Key.", key_topics=[])
+
+    try:
+        llm = ChatOpenAI(
+            model=settings.LLM_MODEL,
+            api_key=settings.OPENROUTER_API_KEY,
+            base_url=settings.OPENROUTER_BASE_URL,
             temperature=0
         )
         structured_llm = llm.with_structured_output(MeetingSummary)
+        prompt = f"Summarize this meeting transcript (max 15000 chars):\n{text[:15000]}"
         
-        prompt = f"""
-        Summarize the following meeting chat.
-        Identify 3-5 key topics discussed.
-        
-        Transcript:
-        {text[:15000]}
-        """
-        
+        logger.info("Generating Summary...")
         return structured_llm.invoke(prompt)
     except Exception as e:
-        print(f"LLM Summary failed: {e}")
-        return MeetingSummary(summary="Summary generation failed.", key_topics=[])
+        logger.error(f"Summary Generation Failed: {e}")
+        return MeetingSummary(summary="Failed.", key_topics=[])
 
 def extract_meeting_data(text: str) -> ExtractedMeetingData:
-    # Pass 1: Deterministic
-    contacts, services, cleaned_transcript = extract_contacts_and_services(text)
+    logger.info("Starting Hybrid Extraction...")
     
-    # Pass 2: LLM
-    summary_data = extract_summary_with_llm(text)
+    # 1. Parse Messages
+    raw_messages = parse_transcript_lines(text)
+    logger.info(f"Parsed {len(raw_messages)} raw messages.")
+    
+    # 2. Extract Hard Contact Info (Deterministic)
+    contacts_map = extract_hard_contact_info(raw_messages)
+    
+    # 3. LLM Intent Analysis (Services + Noise Filter)
+    intent_data = analyze_with_llm(raw_messages)
+    
+    # 4. Filter Transcript (Remove Noise)
+    noise_ids = set(intent_data.noise_message_ids)
+    final_transcript = [m for m in raw_messages if m.id not in noise_ids]
+    
+    # 5. Build Final Contacts List
+    # We include a contact if they have a Service OR if we found Email/Phone
+    final_contacts = []
+    for name, info in contacts_map.items():
+        has_service = any(s.contact_name == name for s in intent_data.services)
+        has_contact_data = info["email"] or info["phone"]
+        
+        if has_service or has_contact_data:
+            final_contacts.append(ExtractedContact(
+                name=name,
+                email=info["email"],
+                phone=info["phone"],
+                role=None
+            ))
+            
+    # 6. Summary
+    summary = extract_summary_with_llm(text)
+    
+    logger.info("Extraction Complete.")
     
     return ExtractedMeetingData(
-        contacts=contacts,
-        services=services,
-        summary=summary_data,
-        cleaned_transcript=cleaned_transcript
+        contacts=final_contacts,
+        services=intent_data.services,
+        summary=summary,
+        cleaned_transcript=final_transcript
     )
+
