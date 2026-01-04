@@ -52,7 +52,7 @@ async def upload_meeting_chat(
 
     # 5. Extract Data using LLM
     try:
-        extracted_data = extract_meeting_data(cleaned_text)
+        extracted_data = await extract_meeting_data(cleaned_text)
     except Exception as e:
         # Fallback or error? For now, log and fail, or we could fallback to regex.
         # But user specifically requested better extraction.

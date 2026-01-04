@@ -1,5 +1,6 @@
 import re
 import logging
+import asyncio
 from typing import List, Dict, Set, Optional, Tuple
 from pydantic import BaseModel, Field
 from langchain_openai import ChatOpenAI
@@ -46,8 +47,11 @@ PHONE_REGEX = r'\(?\d{3}\)?[\s.-]?\d{3}[\s.-]?\d{4}'
 EMAIL_REGEX = r'[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}'
 URL_REGEX = r'(https?://[^\s]+)'
 
-# Zoom Pattern: Optional Date + Time + From [Name] to Everyone: [Message]
-ZOOM_MSG_PATTERN = re.compile(r'(?:\d{4}-\d{2}-\d{2}\s+)?\d{2}:\d{2}:\d{2}\s+From\s+(.+?)\s+to\s+Everyone:\s+(.*)', re.IGNORECASE)
+# Zoom Pattern: [Timestamp] From [Name] to Everyone: [Message]
+# Group 1: Timestamp (including date if present)
+# Group 2: Sender Name
+# Group 3: Message Content
+ZOOM_MSG_PATTERN = re.compile(r'((?:\d{4}-\d{2}-\d{2}\s+)?\d{2}:\d{2}:\d{2})\s+From\s+(.+?)\s+to\s+Everyone:\s*(.*)', re.IGNORECASE)
 
 def clean_description(text: str) -> str:
     """Removes URLs and extra whitespace."""
@@ -55,17 +59,35 @@ def clean_description(text: str) -> str:
     return text.strip()
 
 def parse_transcript_lines(text: str) -> List[CleanedMessage]:
-    """Parses raw text into structured messages."""
+    """Parses raw text into structured messages. Handles multi-line messages."""
     lines = text.split('\n')
     parsed = []
     idx = 0
+    current_msg = None
+
     for line in lines:
         match = ZOOM_MSG_PATTERN.search(line)
         if match:
-            sender = match.group(1).strip()
-            msg = match.group(2).strip()
-            parsed.append(CleanedMessage(id=idx, sender=sender, message=msg))
+            # If we were building a previous message, save it
+            if current_msg:
+                parsed.append(current_msg)
+            
+            timestamp = match.group(1).strip()
+            sender = match.group(2).strip()
+            # The message might start on this line or be empty
+            initial_msg = match.group(3).strip()
+            
+            current_msg = CleanedMessage(id=idx, sender=sender, message=initial_msg, timestamp=timestamp)
             idx += 1
+        elif current_msg:
+            # Strict multi-line handling: append to current message if it's not a new timestamp header
+            cleaned_line = line.strip()
+            if cleaned_line:
+                current_msg.message += " " + cleaned_line
+
+    if current_msg:
+        parsed.append(current_msg)
+        
     return parsed
 
 def extract_hard_contact_info(messages: List[CleanedMessage]) -> Dict[str, Dict]:
@@ -95,10 +117,13 @@ def extract_hard_contact_info(messages: List[CleanedMessage]) -> Dict[str, Dict]
             
     return contacts_map
 
-def analyze_with_llm(messages: List[CleanedMessage]) -> IntentAnalysis:
-    """Pass 2: LLM Intent Analysis."""
+def chunk_messages(messages: List[CleanedMessage], chunk_size: int = 200) -> List[List[CleanedMessage]]:
+    """Splits messages into chunks for parallel processing."""
+    return [messages[i:i + chunk_size] for i in range(0, len(messages), chunk_size)]
+
+async def analyze_chunk(messages_chunk: List[CleanedMessage], chunk_index: int) -> IntentAnalysis:
+    """Analyzes a single chunk of messages."""
     if not settings.OPENROUTER_API_KEY:
-        logger.warning("No API Key found. Skipping LLM analysis.")
         return IntentAnalysis(services=[], noise_message_ids=[])
 
     try:
@@ -110,35 +135,54 @@ def analyze_with_llm(messages: List[CleanedMessage]) -> IntentAnalysis:
         )
         structured_llm = llm.with_structured_output(IntentAnalysis)
 
-        # Prepare a concise version for LLM to save tokens
-        transcript_text = "\n".join([f"[{m.id}] {m.sender}: {m.message}" for m in messages[:600]]) # Limit to ~600 messages for safety
+        # Prepare text for this chunk
+        transcript_text = "\n".join([f"[{m.id}] {m.sender}: {m.message}" for m in messages_chunk])
 
         prompt = f"""
-        You are an expert meeting assistant. Analyze the following Zoom chat transcript.
+        # Role
+        You are an expert Data Analyst. Your goal is to capture value from chat logs by extracting offers and requests EXACTLY as they were stated.
+
+        # Definitions
+        1. **OFFER**: Explicit provision of a service, product, or professional resource.
+           - INCLUDES: Sharing portfolios, calendar links, offering professional introductions.
+           - EXCLUDES: Jokes ("I offer my soul"), vague interest ("Me too"), or personal non-business non-offers.
+        2. **REQUEST**: Explicit need for a business service, product, connection, OR **specific questions** about business topics/strategy.
+           - INCLUDES: "Looking for a React dev", "Need a lawyer", "How do I structure a wrap?", "What is a lease option?".
+           - EXCLUDES: Rhetorical questions, personal banter.
+        3. **NOISE**: Salutations ("Hi"), Jokes ("Haha"), Logistics ("Can you hear me?"), Vague comments ("Interested", "Yes", "Agreed").
+
+        # Critical Guidelines
+        1. **ATTRIBUTION IS MANDATORY**: 
+           - You MUST attribute the offer/request to the name in the "From [Name]" field.
+           - NEVER use "Unattributed" if a name is present.
         
-        Task 1: Extract all "Offers" and "Requests".
-        - Offer: Someone offering a service, funding, help, or resource.
-        - Request: Someone looking for a service, connection, or help.
-        - For each, provide a clear description and the Sender's Name.
-        
-        Task 2: Identify "Noise".
-        - Identify message IDs (numbers in brackets) that are pure noise, jokes, simple greetings ("hi"), or irrelevant chatter.
-        - Keep messages that provide context to offers/requests.
-        
-        Transcript:
+        2. **PRESERVE DETAIL (Do Not Summarize)**:
+           - The user wants the ORIGINAL CONTEXT in the description.
+           - Do not shorten "I have a deal in Texas looking for buyers, hit me up at 555-0199" to "Real estate deal". Keep the phone number!
+           - EXTRACT THE FULL RELEVANT SENTENCE/PARAGRAPH.
+
+        # Task
+        Analyze the refined transcript chunk below.
+        1. Identify EVERY message that is a clear Business Offer or Request.
+        2. Identify EVERY message ID that is Noise (jokes, greetings, irrelevant chatter).
+        3. For valid Offers/Requests, extract:
+           - Type (offer/request)
+           - Description: The VERBATIM (or slightly cleaned) message content preserving all links and details.
+           - Sender Name: The exact name from the "From" field.
+
+        <transcript_chunk index="{chunk_index}">
         {transcript_text}
+        </transcript_chunk>
         """
         
-        logger.info("Sending transcript to LLM for Intent Analysis...")
-        result = structured_llm.invoke(prompt)
-        logger.info(f"LLM Analysis Complete. Found {len(result.services)} services and {len(result.noise_message_ids)} noise items.")
-        return result
+        # logger.info(f"Analyzing chunk {chunk_index} ({len(messages_chunk)} messages)...")
+        return await structured_llm.ainvoke(prompt)
 
     except Exception as e:
-        logger.error(f"LLM Intent Analysis Failed: {e}")
+        logger.error(f"LLM Chunk Analysis Failed (Chunk {chunk_index}): {e}")
         return IntentAnalysis(services=[], noise_message_ids=[])
 
-def extract_summary_with_llm(text: str) -> MeetingSummary:
+async def extract_summary_with_llm(text: str) -> MeetingSummary:
     """Pass 3: Summary Generation."""
     if not settings.OPENROUTER_API_KEY:
         return MeetingSummary(summary="No API Key.", key_topics=[])
@@ -154,12 +198,12 @@ def extract_summary_with_llm(text: str) -> MeetingSummary:
         prompt = f"Summarize this meeting transcript (max 15000 chars):\n{text[:15000]}"
         
         logger.info("Generating Summary...")
-        return structured_llm.invoke(prompt)
+        return await structured_llm.ainvoke(prompt)
     except Exception as e:
         logger.error(f"Summary Generation Failed: {e}")
         return MeetingSummary(summary="Failed.", key_topics=[])
 
-def extract_meeting_data(text: str) -> ExtractedMeetingData:
+async def extract_meeting_data(text: str) -> ExtractedMeetingData:
     logger.info("Starting Hybrid Extraction...")
     
     # 1. Parse Messages
@@ -169,18 +213,42 @@ def extract_meeting_data(text: str) -> ExtractedMeetingData:
     # 2. Extract Hard Contact Info (Deterministic)
     contacts_map = extract_hard_contact_info(raw_messages)
     
-    # 3. LLM Intent Analysis (Services + Noise Filter)
-    intent_data = analyze_with_llm(raw_messages)
+    # 3. LLM Intent Analysis (Parallel Chunks) + Summary
+    logger.info("Starting Parallel LLM Tasks...")
+    
+    # Chunking
+    chunks = chunk_messages(raw_messages, chunk_size=200) # 200 msg chunks
+    logger.info(f"Split transcript into {len(chunks)} chunks for parallel analysis.")
+    
+    # Create tasks
+    intent_tasks = [analyze_chunk(chunk, i) for i, chunk in enumerate(chunks)]
+    summary_task = extract_summary_with_llm(text)
+    
+    # Run all
+    results = await asyncio.gather(*intent_tasks, summary_task)
+    
+    # Separate results
+    chunk_results = results[:-1]
+    summary = results[-1]
+    
+    # Merge Intent Analysis Results
+    all_services = []
+    all_noise_ids = set()
+    
+    for res in chunk_results:
+        if isinstance(res, IntentAnalysis):
+            all_services.extend(res.services)
+            all_noise_ids.update(res.noise_message_ids)
+    
+    logger.info(f"Merged Parallel Results: {len(all_services)} services, {len(all_noise_ids)} noise items.")
     
     # 4. Filter Transcript (Remove Noise)
-    noise_ids = set(intent_data.noise_message_ids)
-    final_transcript = [m for m in raw_messages if m.id not in noise_ids]
+    final_transcript = [m for m in raw_messages if m.id not in all_noise_ids]
     
     # 5. Build Final Contacts List
-    # We include a contact if they have a Service OR if we found Email/Phone
     final_contacts = []
     for name, info in contacts_map.items():
-        has_service = any(s.contact_name == name for s in intent_data.services)
+        has_service = any(s.contact_name == name for s in all_services)
         has_contact_data = info["email"] or info["phone"]
         
         if has_service or has_contact_data:
@@ -191,14 +259,11 @@ def extract_meeting_data(text: str) -> ExtractedMeetingData:
                 role=None
             ))
             
-    # 6. Summary
-    summary = extract_summary_with_llm(text)
-    
     logger.info("Extraction Complete.")
     
     return ExtractedMeetingData(
         contacts=final_contacts,
-        services=intent_data.services,
+        services=all_services,
         summary=summary,
         cleaned_transcript=final_transcript
     )
