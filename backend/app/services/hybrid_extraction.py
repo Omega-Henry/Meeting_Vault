@@ -51,7 +51,7 @@ URL_REGEX = r'(https?://[^\s]+)'
 # Group 1: Timestamp (including date if present)
 # Group 2: Sender Name
 # Group 3: Message Content
-ZOOM_MSG_PATTERN = re.compile(r'((?:\d{4}-\d{2}-\d{2}\s+)?\d{2}:\d{2}:\d{2})\s+From\s+(.+?)\s+to\s+Everyone:\s*(.*)', re.IGNORECASE)
+ZOOM_MSG_PATTERN = re.compile(r'((?:\d{4}-\d{2}-\d{2}\s+)?\d{1,2}:\d{2}(?::\d{2})?)\s+From\s+(.+?)\s+to\s+Everyone:\s*(.*)', re.IGNORECASE)
 
 def clean_description(text: str) -> str:
     """Removes URLs and extra whitespace."""
@@ -211,6 +211,8 @@ async def extract_meeting_data(text: str) -> ExtractedMeetingData:
     
     # 1. Parse Messages
     raw_messages = parse_transcript_lines(text)
+    if not raw_messages:
+        logger.warning("No messages parsed from transcript! Check date format or regex.")
     logger.info(f"Parsed {len(raw_messages)} raw messages.")
     
     # 2. Extract Hard Contact Info (Deterministic)
