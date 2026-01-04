@@ -144,15 +144,18 @@ async def analyze_chunk(messages_chunk: List[CleanedMessage], chunk_index: int) 
 
         # Definitions
         1. **OFFER**: Explicit provision of a service, product, or professional resource.
-           - INCLUDES: Sharing portfolios, calendar links, offering professional introductions.
+           - INCLUDES: "I am a buyer", "I have capital to deploy", "I am a TC", "I am a transaction coordinator", "I have a deal in Texas", "I can help you...", "We are buying".
            - EXCLUDES: Jokes ("I offer my soul"), vague interest ("Me too"), or personal non-business non-offers.
         2. **REQUEST**: Explicit need for a business service, product, connection, OR **specific questions** about business topics/strategy.
-           - INCLUDES: "Looking for a React dev", "Need a lawyer", "How do I structure a wrap?", "What is a lease option?".
+           - INCLUDES: "Looking for a React dev", "Need a lawyer", "How do I structure a wrap?", "What is a lease option?", "Who wants this deal?", "What are your funding requirements?".
            - EXCLUDES: Rhetorical questions, personal banter.
-        3. **NOISE**: Salutations ("Hi"), Jokes ("Haha"), Logistics ("Can you hear me?"), Vague comments ("Interested", "Yes", "Agreed").
+        3. **NOISE**: Salutations ("Hi"), Jokes ("Haha"), Logistics ("Can you hear me?"), Vague comments ("Interested", "Yes", "Agreed", "Nope").
 
         # Critical Guidelines
-        1. **ATTRIBUTION IS MANDATORY**: 
+        1. **BIAS TOWARDS EXTRACTION**:
+           - If a message *might* be a business offer or request, extract it. Do not discard potential value.
+
+        2. **ATTRIBUTION IS MANDATORY**: 
            - You MUST attribute the offer/request to the name in the "From [Name]" field.
            - NEVER use "Unattributed" if a name is present.
         
@@ -241,8 +244,29 @@ async def extract_meeting_data(text: str) -> ExtractedMeetingData:
             all_noise_ids.update(res.noise_message_ids)
     
     logger.info(f"Merged Parallel Results: {len(all_services)} services, {len(all_noise_ids)} noise items.")
+
+    # 4. Strict Regex Noise Filter (Post-Processing)
+    # Catches short "Yes/No/Lol" messages that LLM might miss or classify as "Chat" instead of "Noise"
+    # Regex for short conversational fillers. Includes optional punctuation/whitespace.
+    STRICT_NOISE_REGEX = re.compile(r'^\W*(yes|no|nope|nah|yeah|yep|yup|ok|okay|thx|thanks|thank you|lol|lmao|haha|right|correct|sure|agreed|absolutely|less|more|same|me too|details\?)\W*$', re.IGNORECASE)
     
-    # 4. Filter Transcript (Remove Noise)
+    for m in raw_messages:
+        # If it's already marked as noise, skip
+        if m.id in all_noise_ids:
+            continue
+            
+        clean_content = m.message.strip()
+        
+        # Check if it looks like contact info (don't delete phones/emails)
+        has_contact_info = re.search(PHONE_REGEX, clean_content) or re.search(EMAIL_REGEX, clean_content)
+        
+        if not has_contact_info:
+            # If extremely short (< 20 chars) and matches noise words
+            if len(clean_content) < 20 and STRICT_NOISE_REGEX.search(clean_content):
+                 all_noise_ids.add(m.id)
+            # Also filter single emojis/punctuation if needed, but the regex above covers common words
+    
+    # 5. Filter Transcript (Remove Noise)
     final_transcript = [m for m in raw_messages if m.id not in all_noise_ids]
     
     # 5. Build Final Contacts List
