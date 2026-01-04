@@ -76,7 +76,8 @@ export default function UserServices({ type }: UserServicesProps) {
                     <table className="w-full text-sm text-left">
                         <thead className="bg-muted/50 text-muted-foreground font-medium">
                             <tr>
-                                <th className="px-4 py-3">Description</th>
+                                <th className="px-4 py-3 w-1/2">Description</th>
+                                <th className="px-4 py-3">Links</th>
                                 <th className="px-4 py-3">{thType}</th>
                                 <th className="px-4 py-3 text-right">Actions</th>
                             </tr>
@@ -84,27 +85,59 @@ export default function UserServices({ type }: UserServicesProps) {
                         <tbody className="divide-y divide-border">
                             {loading ? (
                                 <tr>
-                                    <td colSpan={3} className="px-4 py-8 text-center text-muted-foreground">
+                                    <td colSpan={4} className="px-4 py-8 text-center text-muted-foreground">
                                         Loading...
                                     </td>
                                 </tr>
                             ) : services.length === 0 ? (
                                 <tr>
-                                    <td colSpan={3} className="px-4 py-8 text-center text-muted-foreground">
+                                    <td colSpan={4} className="px-4 py-8 text-center text-muted-foreground">
                                         No entries found.
                                     </td>
                                 </tr>
                             ) : (
                                 services.map((item) => (
-                                    <tr key={item.id} className="hover:bg-muted/50 transition-colors">
-                                        <td className="px-4 py-3 font-medium">{item.description}</td>
+                                    <tr
+                                        key={item.id}
+                                        className="hover:bg-muted/50 transition-colors cursor-pointer"
+                                        onClick={() => setSelectedItem(item)} // Click row to view details (reusing selectedItem logic below, but need new view mode)
+                                    >
+                                        <td className="px-4 py-3 font-medium">
+                                            <div className="line-clamp-2" title="Click to view full description">
+                                                {item.description}
+                                            </div>
+                                        </td>
+                                        <td className="px-4 py-3">
+                                            {item.links && item.links.length > 0 ? (
+                                                <div className="flex flex-col gap-1">
+                                                    {item.links.slice(0, 2).map((link: string, i: number) => (
+                                                        <a
+                                                            key={i}
+                                                            href={link}
+                                                            target="_blank"
+                                                            rel="noopener noreferrer"
+                                                            className="text-xs text-blue-500 hover:underline truncate max-w-[150px]"
+                                                            onClick={(e) => e.stopPropagation()} // Prevent row click
+                                                        >
+                                                            {link}
+                                                        </a>
+                                                    ))}
+                                                    {item.links.length > 2 && <span className="text-xs text-muted-foreground">+{item.links.length - 2} more</span>}
+                                                </div>
+                                            ) : (
+                                                <span className="text-muted-foreground text-xs">-</span>
+                                            )}
+                                        </td>
                                         <td className="px-4 py-3">
                                             {item.contacts?.name || item.contact_name || 'Unknown'}
                                             <div className="text-xs text-muted-foreground">{item.contacts?.email}</div>
                                         </td>
                                         <td className="px-4 py-3 text-right">
                                             <button
-                                                onClick={() => openSuggestModal(item)}
+                                                onClick={(e) => {
+                                                    e.stopPropagation()
+                                                    openSuggestModal(item)
+                                                }}
                                                 className="text-xs text-primary hover:underline"
                                             >
                                                 Suggest Edit
@@ -117,6 +150,44 @@ export default function UserServices({ type }: UserServicesProps) {
                     </table>
                 </div>
             </div>
+
+            {/* View Details Modal */}
+            {selectedItem && !modalOpen && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50" onClick={() => setSelectedItem(null)}>
+                    <div className="bg-background rounded-lg shadow-lg w-full max-w-md p-6 space-y-4" onClick={(e) => e.stopPropagation()}>
+                        <h2 className="text-xl font-bold">Service Details</h2>
+
+                        <div className="space-y-2">
+                            <h3 className="text-sm font-medium text-muted-foreground">Description</h3>
+                            <p className="text-sm whitespace-pre-wrap leading-relaxed bg-muted/30 p-3 rounded-md border">
+                                {selectedItem.description}
+                            </p>
+                        </div>
+
+                        {selectedItem.links && selectedItem.links.length > 0 && (
+                            <div className="space-y-2">
+                                <h3 className="text-sm font-medium text-muted-foreground">Links</h3>
+                                <div className="flex flex-col gap-1">
+                                    {selectedItem.links.map((link: string, i: number) => (
+                                        <a key={i} href={link} target="_blank" rel="noopener noreferrer" className="text-blue-500 hover:underline break-all text-sm">
+                                            {link}
+                                        </a>
+                                    ))}
+                                </div>
+                            </div>
+                        )}
+
+                        <div className="flex justify-end pt-2">
+                            <button
+                                onClick={() => setSelectedItem(null)}
+                                className="px-4 py-2 text-sm font-medium border rounded-md hover:bg-muted"
+                            >
+                                Close
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
 
             <ChangeRequestModal
                 isOpen={modalOpen}

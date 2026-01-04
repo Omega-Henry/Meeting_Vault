@@ -71,19 +71,20 @@ export default function UserContacts() {
                                 <th className="px-4 py-3">Name</th>
                                 <th className="px-4 py-3">Email</th>
                                 <th className="px-4 py-3">Phone</th>
+                                <th className="px-4 py-3">Links</th>
                                 <th className="px-4 py-3 text-right">Actions</th>
                             </tr>
                         </thead>
                         <tbody className="divide-y divide-border">
                             {loading ? (
                                 <tr>
-                                    <td colSpan={4} className="px-4 py-8 text-center text-muted-foreground">
+                                    <td colSpan={5} className="px-4 py-8 text-center text-muted-foreground">
                                         Loading contacts...
                                     </td>
                                 </tr>
                             ) : contacts.length === 0 ? (
                                 <tr>
-                                    <td colSpan={4} className="px-4 py-8 text-center text-muted-foreground">
+                                    <td colSpan={5} className="px-4 py-8 text-center text-muted-foreground">
                                         No contacts found.
                                     </td>
                                 </tr>
@@ -93,6 +94,25 @@ export default function UserContacts() {
                                         <td className="px-4 py-3 font-medium">{contact.name || 'Unknown'}</td>
                                         <td className="px-4 py-3">{contact.email || '-'}</td>
                                         <td className="px-4 py-3">{contact.phone || '-'}</td>
+                                        <td className="px-4 py-3">
+                                            {contact.links && contact.links.length > 0 ? (
+                                                <div className="flex flex-wrap gap-2">
+                                                    {contact.links.map((link: string, i: number) => (
+                                                        <a
+                                                            key={i}
+                                                            href={link}
+                                                            target="_blank"
+                                                            rel="noopener noreferrer"
+                                                            className="text-xs text-blue-500 hover:underline truncate max-w-[150px] inline-block"
+                                                        >
+                                                            {link}
+                                                        </a>
+                                                    ))}
+                                                </div>
+                                            ) : (
+                                                <span className="text-muted-foreground text-xs">-</span>
+                                            )}
+                                        </td>
                                         <td className="px-4 py-3 text-right">
                                             <button
                                                 onClick={() => openSuggestModal(contact)}
