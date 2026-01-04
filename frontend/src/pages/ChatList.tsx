@@ -10,10 +10,14 @@ export default function ChatList() {
     const [uploading, setUploading] = useState(false)
 
     const fetchChats = async () => {
-        const { data } = await supabase
+        const { data, error } = await supabase
             .from('meeting_chats')
             .select('*')
             .order('created_at', { ascending: false })
+
+        if (error) {
+            console.error("Error fetching chats:", error)
+        }
 
         if (data) setChats(data)
         setLoading(false)
@@ -86,7 +90,7 @@ export default function ChatList() {
                 {chats.map((chat) => (
                     <Link
                         key={chat.id}
-                        to={`/chats/${chat.id}`}
+                        to={`/admin/chats/${chat.id}`}
                         className="group relative flex flex-col justify-between rounded-lg border p-6 hover:bg-muted/50 transition-colors"
                     >
                         <div className="space-y-2">

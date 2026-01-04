@@ -1,18 +1,123 @@
-from fastapi import APIRouter, UploadFile, File, Depends, HTTPException, status
-from supabase import Client
-from app.dependencies import get_supabase_client, get_current_user
+from fastapi import APIRouter, UploadFile, File, Depends, HTTPException, status, BackgroundTasks
+from supabase import Client, create_client
+from app.dependencies import get_supabase_client, get_user_context, security, UserContext
 from app.services.ingestion import clean_text, compute_hash
 from app.services.hybrid_extraction import extract_meeting_data
+from app.core.config import settings
 from app.schemas import MeetingChatResponse
 import json
+import logging
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
+
+async def process_extraction_background(chat_id: str, user_id: str, org_id: str, cleaned_text: str, auth_token: str):
+    """
+    Background task to run the heavy AI extraction.
+    Creates its own Supabase client to ensure thread/context safety.
+    """
+    logger.info(f"Starting background extraction for chat {chat_id}")
+    
+    try:
+        # Initialize Supabase Client for this task
+        # We use the anon key but set the user's auth token to respect RLS
+        client: Client = create_client(settings.SUPABASE_URL, settings.SUPABASE_ANON_KEY)
+        client.auth.set_session(access_token=auth_token, refresh_token=auth_token)
+        
+        # 1. Run Extraction (Async)
+        extracted_data = await extract_meeting_data(cleaned_text)
+        
+        # 2. Update Meeting Chat
+        logger.info(f"Updating meeting_chat {chat_id} with summary & cleaned transcript...")
+        try:
+             client.table("meeting_chats").update({
+                "digest_bullets": extracted_data.summary.model_dump(),
+                "cleaned_transcript": [m.model_dump() for m in extracted_data.cleaned_transcript]
+            }).eq("id", chat_id).execute()
+        except Exception as e:
+            # Pydantic/Supabase specific errors or Row-not-found if deleted
+            logger.error(f"Failed to update meeting_chat {chat_id}: {e}")
+            return # Stop if we can't update the chat (likely deleted)
+
+        # 3. Process Contacts & Services
+        # Note: This logic duplicates the original sync logic but is now safe in background
+        contact_name_to_id = {}
+        
+        for contact in extracted_data.contacts:
+            contact_id = None
+            
+            # Check existence by Email
+            if contact.email:
+                res = client.table("contacts").select("id").eq("org_id", org_id).eq("email", contact.email).execute()
+                if res.data:
+                    contact_id = res.data[0]["id"]
+            
+            # Check by Name
+            if not contact_id:
+                res = client.table("contacts").select("id").eq("org_id", org_id).eq("name", contact.name).execute()
+                if res.data:
+                    contact_id = res.data[0]["id"]
+            
+            # Check by Phone
+            if not contact_id and contact.phone:
+                res = client.table("contacts").select("id").eq("org_id", org_id).eq("phone", contact.phone).execute()
+                if res.data:
+                    contact_id = res.data[0]["id"]
+            
+            # Create if new
+            if not contact_id:
+                new_contact = {
+                    "user_id": user_id,
+                    "org_id": org_id,
+                    "name": contact.name,
+                    "email": contact.email,
+                    "phone": contact.phone
+                }
+                res = client.table("contacts").insert(new_contact).execute()
+                contact_id = res.data[0]["id"]
+            
+            contact_name_to_id[contact.name] = contact_id
+
+        # Insert Services
+        for service in extracted_data.services:
+            contact_id = contact_name_to_id.get(service.contact_name)
+            
+            # Fallback for unattributed/hallucinated names
+            if not contact_id:
+                unattributed_res = client.table("contacts").select("id").eq("org_id", org_id).eq("name", "Unattributed").execute()
+                if unattributed_res.data:
+                    contact_id = unattributed_res.data[0]["id"]
+                else:
+                    res = client.table("contacts").insert({
+                        "user_id": user_id, 
+                        "org_id": org_id,
+                        "name": "Unattributed"
+                    }).execute()
+                    contact_id = res.data[0]["id"]
+
+            service_data = {
+                "user_id": user_id,
+                "contact_id": contact_id,
+                "org_id": org_id,
+                "meeting_chat_id": chat_id,
+                "type": service.type,
+                "description": service.description,
+                "links": service.links
+            }
+            client.table("services").insert(service_data).execute()
+            
+        logger.info(f"Background extraction finished for {chat_id}")
+
+    except Exception as e:
+        logger.error(f"Background Task Error for chat {chat_id}: {e}")
 
 @router.post("/upload-meeting-chat", response_model=dict)
 async def upload_meeting_chat(
+    background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
     client: Client = Depends(get_supabase_client),
-    user = Depends(get_current_user)
+    ctx: UserContext = Depends(get_user_context),
+    token_payload = Depends(security) # Need raw token for background task
 ):
     # 1. Read file
     try:
@@ -24,24 +129,23 @@ async def upload_meeting_chat(
     # 2. Ingestion Pipeline
     cleaned_text = clean_text(text)
     chat_hash = compute_hash(cleaned_text)
-    user_id = user.id
+    user_id = ctx.user.id
+    org_id = ctx.org_id
 
-    # 3. Check for duplicates (using the unique index on user_id, chat_hash)
-    # We can try to insert and catch error, or check first.
-    # Checking first is friendlier for the response.
-    
-    existing = client.table("meeting_chats").select("id").eq("user_id", user_id).eq("chat_hash", chat_hash).execute()
+    # 3. Check for duplicates
+    existing = client.table("meeting_chats").select("id").eq("org_id", org_id).eq("chat_hash", chat_hash).execute()
     if existing.data:
         raise HTTPException(status_code=409, detail="This meeting chat has already been uploaded.")
 
-    # 4. Insert into meeting_chats
+    # 4. Insert into meeting_chats (Initial State)
     meeting_data = {
         "user_id": user_id,
-        "telegram_chat_id": "unknown", # Placeholder
+        "org_id": org_id,
+        "telegram_chat_id": "unknown", 
         "meeting_name": file.filename or "Untitled Meeting",
         "chat_hash": chat_hash,
         "cleaned_text": cleaned_text,
-        "digest_bullets": [] # Placeholder for future AI summary
+        "digest_bullets": {"summary": "Processing...", "key_topics": []} # Placeholder
     }
     
     try:
@@ -50,85 +154,9 @@ async def upload_meeting_chat(
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to save meeting chat: {str(e)}")
 
-    # 5. Extract Data using LLM
-    try:
-        extracted_data = await extract_meeting_data(cleaned_text)
-    except Exception as e:
-        # Fallback or error? For now, log and fail, or we could fallback to regex.
-        # But user specifically requested better extraction.
-        print(f"LLM Extraction failed: {e}")
-        # Create a basic summary saying extraction failed
-        extracted_data = None
+    # 5. Schedule Background Extraction
+    # We pass the raw token string
+    raw_token = token_payload.credentials
+    background_tasks.add_task(process_extraction_background, chat_id, user_id, org_id, cleaned_text, raw_token)
 
-    if extracted_data:
-        # Update meeting with summary
-        client.table("meeting_chats").update({
-            "digest_bullets": extracted_data.summary.model_dump(),
-            "cleaned_transcript": [m.model_dump() for m in extracted_data.cleaned_transcript]
-        }).eq("id", chat_id).execute()
-
-        # Process Contacts
-        contact_name_to_id = {}
-        
-        for contact in extracted_data.contacts:
-            # Check existence by Email (if present) or Name
-            contact_id = None
-            
-            if contact.email:
-                res = client.table("contacts").select("id").eq("user_id", user_id).eq("email", contact.email).execute()
-                if res.data:
-                    contact_id = res.data[0]["id"]
-            
-            if not contact_id:
-                # Check by Name
-                res = client.table("contacts").select("id").eq("user_id", user_id).eq("name", contact.name).execute()
-                if res.data:
-                    contact_id = res.data[0]["id"]
-            
-            if not contact_id and contact.phone:
-                # Check by Phone
-                res = client.table("contacts").select("id").eq("user_id", user_id).eq("phone", contact.phone).execute()
-                if res.data:
-                    contact_id = res.data[0]["id"]
-            
-            if not contact_id:
-                # Create
-                new_contact = {
-                    "user_id": user_id,
-                    "name": contact.name,
-                    "email": contact.email,
-                    "phone": contact.phone
-                    # "role": contact.role # Column missing in DB currently
-                }
-                res = client.table("contacts").insert(new_contact).execute()
-                contact_id = res.data[0]["id"]
-            
-            contact_name_to_id[contact.name] = contact_id
-
-        # Process Services
-        for service in extracted_data.services:
-            # Find contact ID
-            contact_id = contact_name_to_id.get(service.contact_name)
-            
-            # If not found (maybe name mismatch), try to find "Unattributed" or create the contact
-            if not contact_id:
-                # Try to find contact by name again in case LLM hallucinated a slight variation
-                # For now, fallback to Unattributed
-                unattributed_res = client.table("contacts").select("id").eq("user_id", user_id).eq("name", "Unattributed").execute()
-                if unattributed_res.data:
-                    contact_id = unattributed_res.data[0]["id"]
-                else:
-                    res = client.table("contacts").insert({"user_id": user_id, "name": "Unattributed"}).execute()
-                    contact_id = res.data[0]["id"]
-
-            service_data = {
-                "user_id": user_id,
-                "contact_id": contact_id,
-                "meeting_chat_id": chat_id,
-                "type": service.type,
-                "description": service.description,
-                "links": service.links
-            }
-            client.table("services").insert(service_data).execute()
-
-    return {"status": "success", "id": chat_id, "message": "File uploaded and processed successfully."}
+    return {"status": "success", "id": chat_id, "message": "File uploaded. Extraction started in background."}

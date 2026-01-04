@@ -10,12 +10,21 @@ MeetingVault is a production-ready web app for storing and analyzing meeting cha
 - **AI Orchestration**: LangGraph + LangChain
 - **Hosting**: Google Cloud Run (2 services)
 
-### Multi-Tenancy & Security (RLS)
+### Multi-Tenancy & Shared Directory (RLS)
 
-We use a single Supabase database with Row Level Security (RLS) to ensure strict data isolation.
-- Every table has a `user_id` column referencing `auth.users(id)`.
-- RLS policies enforce `auth.uid() = user_id` for all operations.
-- This provides the security of separate databases without the operational overhead.
+We use a single Supabase database with Row Level Security (RLS) to ensure strict data isolation and role-based access.
+- **Organization-Based**: Users belong to Organizations (default: "Global Directory").
+- **Roles**:
+    - **Admin**: Full access to Organization data; can approve/reject Change Requests.
+    - **User**: Read-only access to Directory; can suggest edits via Change Requests.
+- **RLS Policies**: Enforce access based on `memberships` table.
+
+### Change Request System
+
+A controlled workflow for data integrity:
+1.  **Suggestion**: Users submit "Change Requests" (JSON payloads) for Contacts or Services.
+2.  **Review**: Admins see a "Pending Requests" queue.
+3.  **Approval**: Admins approve (automatically applying changes) or reject requests.
 
 ### Ingestion Flow
 

@@ -18,6 +18,9 @@ class ServiceBase(BaseModel):
     description: str
     links: List[str] = []
 
+Contact = ContactBase
+Service = ServiceBase
+
 class MeetingChatBase(BaseModel):
     meeting_name: str
     cleaned_text: str

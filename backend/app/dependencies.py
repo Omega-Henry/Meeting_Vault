@@ -2,8 +2,17 @@ from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from supabase import create_client, Client
 from app.core.config import settings
+from pydantic import BaseModel
+from typing import Optional
 
 security = HTTPBearer()
+
+class UserContext(BaseModel):
+    user: object # Supabase User object
+    id: str
+    email: str
+    org_id: str
+    role: str
 
 def get_supabase_client(credentials: HTTPAuthorizationCredentials = Depends(security)) -> Client:
     """
@@ -12,15 +21,8 @@ def get_supabase_client(credentials: HTTPAuthorizationCredentials = Depends(secu
     """
     token = credentials.credentials
     try:
-        # We use the anon key to initialize, but then set the session with the user's token
-        # Actually, passing the token in the headers or using 'auth' method is better.
-        # For supabase-py, we can initialize with the URL and Key, then set the auth token.
-        
-        # However, a cleaner way for RLS is to just pass the token in the headers of the request
-        # made by the supabase client.
-        
         client: Client = create_client(settings.SUPABASE_URL, settings.SUPABASE_ANON_KEY)
-        client.auth.set_session(access_token=token, refresh_token=token) # refresh_token is dummy here if we just want to auth the request
+        client.auth.set_session(access_token=token, refresh_token=token)
         return client
     except Exception as e:
         raise HTTPException(
@@ -29,14 +31,92 @@ def get_supabase_client(credentials: HTTPAuthorizationCredentials = Depends(secu
             headers={"WWW-Authenticate": "Bearer"},
         )
 
+def get_service_role_client() -> Client:
+    """
+    Creates a Supabase client with SERVICE ROLE privileges.
+    Used for bootstrapping memberships and admin-only actions.
+    """
+    if not settings.SUPABASE_SERVICE_ROLE_KEY:
+        # Fallback to anon key if service role is missing, but warn (RLS might block)
+        return create_client(settings.SUPABASE_URL, settings.SUPABASE_ANON_KEY)
+    return create_client(settings.SUPABASE_URL, settings.SUPABASE_SERVICE_ROLE_KEY)
+
 def get_current_user(client: Client = Depends(get_supabase_client)):
     """
     Retrieves the current user from the authenticated Supabase client.
     """
     try:
-        user = client.auth.get_user()
-        if not user:
+        user_response = client.auth.get_user()
+        if not user_response or not user_response.user:
              raise HTTPException(status_code=401, detail="User not found")
-        return user.user
+        return user_response.user
     except Exception as e:
         raise HTTPException(status_code=401, detail="Invalid token")
+
+def get_user_context(
+    user = Depends(get_current_user),
+    client: Client = Depends(get_supabase_client)
+) -> UserContext:
+    """
+    Resolves the user's Organization and Role.
+    Bootstraps membership if it doesn't exist.
+    """
+    # Use the authenticated client (user's JWT) for operations.
+    # This relies on RLS policies allowing:
+    # 1. Reading 'organizations' (Public/Anon read policy)
+    # 2. Reading 'memberships' (User verifies own membership policy)
+    # 3. Inserting 'memberships' (User creates own membership policy)
+    
+    # Check for existing membership
+    res = client.table("memberships").select("*").eq("user_id", user.id).execute()
+    
+    membership = None
+    if res.data:
+        membership = res.data[0]
+    else:
+        # Bootstrap: Create Membership
+        # 1. Determine Role
+        role = "user"
+        # Parse admin emails safely
+        admin_emails = []
+        if hasattr(settings, "ADMIN_EMAILS") and settings.ADMIN_EMAILS:
+            admin_emails = [e.strip() for e in settings.ADMIN_EMAILS.split(",") if e.strip()]
+            
+        if user.email in admin_emails:
+            role = "admin"
+            
+        # 2. Get Default Org (Global Directory)
+        org_res = client.table("organizations").select("id").eq("name", "Global Directory").single().execute()
+        if not org_res.data:
+            # Should exist from migration, but handle edge case
+            raise HTTPException(status_code=500, detail="Default Organization not found. Please run migrations.")
+            
+        default_org_id = org_res.data["id"]
+        
+        # 3. Create Membership
+        new_mem = {
+            "org_id": default_org_id,
+            "user_id": user.id,
+            "role": role
+        }
+        create_res = client.table("memberships").insert(new_mem).execute()
+        if create_res.data:
+            membership = create_res.data[0]
+        else:
+            raise HTTPException(status_code=500, detail="Failed to create membership.")
+
+    if not membership:
+         raise HTTPException(status_code=403, detail="User has no organization membership.")
+
+    return UserContext(
+        user=user,
+        id=user.id,
+        email=user.email,
+        org_id=membership["org_id"],
+        role=membership["role"]
+    )
+
+def require_admin(ctx: UserContext = Depends(get_user_context)) -> UserContext:
+    if ctx.role != "admin":
+        raise HTTPException(status_code=403, detail="Admin privileges required")
+    return ctx

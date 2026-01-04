@@ -36,7 +36,16 @@ export default function ChatDetail() {
             setLoading(false)
         }
         fetchData()
-    }, [id])
+
+        // Polling if processing
+        const interval = setInterval(() => {
+            if (chat && chat.digest_bullets?.summary === 'Processing...') {
+                fetchData()
+            }
+        }, 3000)
+
+        return () => clearInterval(interval)
+    }, [id, chat?.digest_bullets?.summary])
 
     const handleDelete = async () => {
         if (!confirm("Are you sure you want to delete this chat? This will remove all extracted services and data associated with this meeting.")) {

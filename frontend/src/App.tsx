@@ -1,40 +1,39 @@
-import { useEffect, useState } from 'react'
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom'
-import { supabase } from './lib/supabase'
-import { Session } from '@supabase/supabase-js'
 import Login from './pages/Login'
-import Dashboard from './pages/Dashboard'
+import AdminLayout from './layouts/AdminLayout'
+import UserLayout from './layouts/UserLayout'
 import { ThemeProvider } from './components/ThemeProvider'
+import { useUserProfile } from './hooks/useUserContext'
 
 function App() {
-    const [session, setSession] = useState<Session | null>(null)
-    const [loading, setLoading] = useState(true)
-
-    useEffect(() => {
-        supabase.auth.getSession().then(({ data: { session } }) => {
-            setSession(session)
-            setLoading(false)
-        })
-
-        const {
-            data: { subscription },
-        } = supabase.auth.onAuthStateChange((_event, session) => {
-            setSession(session)
-        })
-
-        return () => subscription.unsubscribe()
-    }, [])
+    const { profile, loading } = useUserProfile()
 
     if (loading) {
-        return <div className="flex h-screen items-center justify-center">Loading...</div>
+        return <div className="flex h-screen items-center justify-center bg-background text-foreground">Loading...</div>
     }
 
     return (
         <ThemeProvider defaultTheme="dark" storageKey="vite-ui-theme">
             <Router>
                 <Routes>
-                    <Route path="/login" element={!session ? <Login /> : <Navigate to="/" />} />
-                    <Route path="/*" element={session ? <Dashboard /> : <Navigate to="/login" />} />
+                    <Route path="/login" element={!profile ? <Login /> : <Navigate to="/" />} />
+
+                    {/* Admin Routes */}
+                    <Route path="/admin/*" element={
+                        profile?.role === 'admin' ? <AdminLayout /> : <Navigate to="/" />
+                    } />
+
+                    {/* User Routes */}
+                    <Route path="/app/*" element={
+                        profile ? <UserLayout /> : <Navigate to="/login" />
+                    } />
+
+                    {/* Root Redirect */}
+                    <Route path="/" element={
+                        !profile ? <Navigate to="/login" /> :
+                            profile.role === 'admin' ? <Navigate to="/admin" /> :
+                                <Navigate to="/app/offers" />
+                    } />
                 </Routes>
             </Router>
         </ThemeProvider>
