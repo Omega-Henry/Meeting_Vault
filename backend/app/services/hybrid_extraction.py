@@ -131,7 +131,8 @@ async def analyze_chunk(messages_chunk: List[CleanedMessage], chunk_index: int) 
             model=settings.LLM_MODEL,
             api_key=settings.OPENROUTER_API_KEY,
             base_url=settings.OPENROUTER_BASE_URL,
-            temperature=0
+            temperature=0,
+            request_timeout=120
         )
         structured_llm = llm.with_structured_output(IntentAnalysis)
 
@@ -178,8 +179,10 @@ async def analyze_chunk(messages_chunk: List[CleanedMessage], chunk_index: int) 
         </transcript_chunk>
         """
         
-        # logger.info(f"Analyzing chunk {chunk_index} ({len(messages_chunk)} messages)...")
-        return await structured_llm.ainvoke(prompt)
+        logger.info(f"Analyzing chunk {chunk_index} ({len(messages_chunk)} messages)...")
+        result = await structured_llm.ainvoke(prompt)
+        logger.info(f"Chunk {chunk_index} analysis complete.")
+        return result
 
     except Exception as e:
         logger.error(f"LLM Chunk Analysis Failed (Chunk {chunk_index}): {e}")
@@ -222,11 +225,18 @@ async def extract_meeting_data(text: str) -> ExtractedMeetingData:
     logger.info("Starting Parallel LLM Tasks...")
     
     # Chunking
-    chunks = chunk_messages(raw_messages, chunk_size=200) # 200 msg chunks
+    chunks = chunk_messages(raw_messages, chunk_size=100) # 100 msg chunks
     logger.info(f"Split transcript into {len(chunks)} chunks for parallel analysis.")
     
+    # Create semaphore to limit concurrency
+    sem = asyncio.Semaphore(5)
+
+    async def protected_analyze_chunk(chunk, i):
+        async with sem:
+            return await analyze_chunk(chunk, i)
+
     # Create tasks
-    intent_tasks = [analyze_chunk(chunk, i) for i, chunk in enumerate(chunks)]
+    intent_tasks = [protected_analyze_chunk(chunk, i) for i, chunk in enumerate(chunks)]
     summary_task = extract_summary_with_llm(text)
     
     # Run all
