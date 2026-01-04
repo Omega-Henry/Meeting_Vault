@@ -29,9 +29,12 @@ export default function AdminLayout() {
         <div className="flex h-screen bg-background text-foreground">
             {/* Sidebar */}
             <div className="w-64 border-r border-border bg-card p-4 flex flex-col">
-                <div className="mb-8 flex items-center justify-between px-2">
-                    <h1 className="text-xl font-bold">MeetingVault</h1>
-                    <ThemeToggle />
+                <div className="mb-8 px-2">
+                    <div className="flex items-center justify-between">
+                        <h1 className="text-xl font-bold">MeetingVault</h1>
+                        <ThemeToggle />
+                    </div>
+                    <p className="text-xs text-muted-foreground font-medium mt-1">ADMIN PORTAL</p>
                 </div>
 
                 <nav className="space-y-1 flex-1">

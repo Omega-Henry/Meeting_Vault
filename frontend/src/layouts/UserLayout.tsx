@@ -26,7 +26,7 @@ export default function UserLayout() {
                 <div className="mb-8 flex items-center justify-between px-2">
                     <div>
                         <h1 className="text-xl font-bold">MeetingVault</h1>
-                        <span className="text-xs text-muted-foreground capitalize">{profile?.role} Portal</span>
+                        <span className="text-xs text-muted-foreground uppercase tracking-wider">MEMBER PORTAL</span>
                     </div>
                     <ThemeToggle />
                 </div>
