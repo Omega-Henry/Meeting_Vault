@@ -75,6 +75,9 @@ def get_user_context(
         membership = res.data[0]
     else:
         # Bootstrap: Create Membership
+        # Use Service Role client to bypass RLS for creation (users can't insert their own membership by default)
+        service_client = get_service_role_client()
+
         # 1. Determine Role
         role = "user"
         # Parse admin emails safely
@@ -82,11 +85,12 @@ def get_user_context(
         if hasattr(settings, "ADMIN_EMAILS") and settings.ADMIN_EMAILS:
             admin_emails = [e.strip() for e in settings.ADMIN_EMAILS.split(",") if e.strip()]
             
-        if user.email in admin_emails:
+        if user.email in admin_emails or user.email == settings.ADMIN_EMAIL:
             role = "admin"
             
         # 2. Get Default Org (Global Directory)
-        org_res = client.table("organizations").select("id").eq("name", "Global Directory").single().execute()
+        # Use service client here too for safety
+        org_res = service_client.table("organizations").select("id").eq("name", "Global Directory").single().execute()
         if not org_res.data:
             # Should exist from migration, but handle edge case
             raise HTTPException(status_code=500, detail="Default Organization not found. Please run migrations.")
@@ -99,7 +103,7 @@ def get_user_context(
             "user_id": user.id,
             "role": role
         }
-        create_res = client.table("memberships").insert(new_mem).execute()
+        create_res = service_client.table("memberships").insert(new_mem).execute()
         if create_res.data:
             membership = create_res.data[0]
         else:
