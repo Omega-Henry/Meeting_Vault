@@ -15,7 +15,7 @@ export default function RequestsTable() {
         const { data: { session } } = await supabase.auth.getSession()
         if (!session) return
 
-        const res = await fetch(`${import.meta.env.VITE_API_BASE_URL || ''}/api/change-requests/admin/pending`, {
+        const res = await fetch(`${import.meta.env.VITE_API_BASE_URL || ''}/api/change-requests?status=pending`, {
             headers: {
                 'Authorization': `Bearer ${session.access_token}`
             }

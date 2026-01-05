@@ -25,7 +25,7 @@ def create_change_request(
         raise HTTPException(status_code=400, detail="Invalid target_type")
 
     data = {
-        "user_id": user["id"],
+        "user_id": user.id,
         "target_type": request.target_type,
         "target_id": request.target_id,
         "changes": request.changes,

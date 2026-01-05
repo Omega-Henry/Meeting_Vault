@@ -17,9 +17,8 @@ async def query_assistant(
     user: dict = Depends(get_current_user)
 ):
     # Prepare state
-    initial_state = {
         "messages": [HumanMessage(content=request.query)],
-        "user_id": user["id"],
+        "user_id": user.id,
         "intent": "",
         "tool_calls": [],
         "tool_outputs": [],
