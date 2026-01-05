@@ -12,7 +12,10 @@ interface MergeSuggestion {
     proposed_primary_contact_id: string
 }
 
+import { useNavigate } from 'react-router-dom'
+
 export default function DatabaseEditor() {
+    const navigate = useNavigate()
     const [activeTab, setActiveTab] = useState<'scanner' | 'manual'>('scanner')
     const [suggestions, setSuggestions] = useState<MergeSuggestion[]>([])
     const [loadingScan, setLoadingScan] = useState(false)
@@ -49,7 +52,7 @@ export default function DatabaseEditor() {
         try {
             const { data: { session } } = await supabase.auth.getSession()
             const token = session?.access_token
-            const res = await fetch(`${import.meta.env.VITE_API_BASE_URL}/api/admin/merge-contacts`, {
+            const res = await fetch(`${import.meta.env.VITE_API_BASE_URL}/api/admin/contacts/merge`, {
                 method: 'POST',
                 headers: {
                     'Authorization': `Bearer ${token}`,
@@ -69,7 +72,7 @@ export default function DatabaseEditor() {
         }
     }
 
-    // Manual Search
+    // Manual Operations
     const handleSearch = async (e: React.FormEvent) => {
         e.preventDefault()
         setSearching(true)
@@ -85,6 +88,18 @@ export default function DatabaseEditor() {
             console.error(err)
         } finally {
             setSearching(false)
+        }
+    }
+
+    const handleDelete = async (id: string) => {
+        if (!confirm("Are you sure you want to delete this contact? This cannot be undone and will remove all associated services.")) return
+        try {
+            const { error } = await supabase.from('contacts').delete().eq('id', id)
+            if (error) throw error
+            setSearchResults(prev => prev.filter(c => c.id !== id))
+        } catch (err) {
+            console.error(err)
+            alert("Failed to delete contact")
         }
     }
 
@@ -185,10 +200,18 @@ export default function DatabaseEditor() {
                                     <div className="text-sm text-muted-foreground">{c.email} • {c.phone}</div>
                                 </div>
                                 <div className="flex gap-2">
-                                    <button className="p-2 hover:bg-muted rounded" title="Edit">
+                                    <button
+                                        onClick={() => navigate(`/admin/contacts?search=${encodeURIComponent(c.name || c.email || '')}`)}
+                                        className="p-2 hover:bg-muted rounded"
+                                        title="Edit in Contacts"
+                                    >
                                         <Edit className="h-4 w-4" />
                                     </button>
-                                    <button className="p-2 hover:bg-red-500/10 text-red-500 rounded" title="Delete">
+                                    <button
+                                        onClick={() => handleDelete(c.id)}
+                                        className="p-2 hover:bg-red-500/10 text-red-500 rounded"
+                                        title="Delete"
+                                    >
                                         <Trash2 className="h-4 w-4" />
                                     </button>
                                 </div>

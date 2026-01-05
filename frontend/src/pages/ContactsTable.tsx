@@ -111,15 +111,14 @@ export default function ContactsTable() {
                             <th className="px-4 py-3 font-medium">Email</th>
                             <th className="px-4 py-3 font-medium">Phone</th>
                             <th className="px-4 py-3 font-medium">Services</th>
-                            <th className="px-4 py-3 font-medium">Links</th>
                             <th className="px-4 py-3 font-medium w-10"></th>
                         </tr>
                     </thead>
                     <tbody className="divide-y divide-border">
                         {loading ? (
-                            <tr><td colSpan={4} className="p-4 text-center">Loading...</td></tr>
+                            <tr><td colSpan={6} className="p-4 text-center">Loading...</td></tr>
                         ) : contacts.length === 0 ? (
-                            <tr><td colSpan={5} className="p-4 text-center text-muted-foreground">No contacts found</td></tr>
+                            <tr><td colSpan={6} className="p-4 text-center text-muted-foreground">No contacts found</td></tr>
                         ) : (
                             contacts.map((contact) => (
                                 <ContactRow
@@ -141,9 +140,6 @@ export default function ContactsTable() {
         </div>
     )
 }
-// End of ContactsTable
-
-// End of ContactsTable
 
 function ContactRow({ contact, selected, onSelect, onUpdate }: { contact: any, selected: boolean, onSelect: () => void, onUpdate: () => void }) {
     const [isEditing, setIsEditing] = useState(false)
@@ -151,6 +147,13 @@ function ContactRow({ contact, selected, onSelect, onUpdate }: { contact: any, s
     const [email, setEmail] = useState(contact.email || '')
     const [phone, setPhone] = useState(contact.phone || '')
     const [saving, setSaving] = useState(false)
+
+    // Sync state when contact prop updates (important for stability)
+    useEffect(() => {
+        setName(contact.name || '')
+        setEmail(contact.email || '')
+        setPhone(contact.phone || '')
+    }, [contact])
 
     const handleSave = async () => {
         setSaving(true)
@@ -176,7 +179,7 @@ function ContactRow({ contact, selected, onSelect, onUpdate }: { contact: any, s
                 </td>
                 <td className="px-4 py-3">
                     <input
-                        className="w-full border rounded px-2 py-1 text-sm"
+                        className="w-full border rounded px-2 py-1 text-sm bg-white text-black"
                         value={name}
                         onChange={e => setName(e.target.value)}
                         placeholder="Name"
@@ -184,7 +187,7 @@ function ContactRow({ contact, selected, onSelect, onUpdate }: { contact: any, s
                 </td>
                 <td className="px-4 py-3">
                     <input
-                        className="w-full border rounded px-2 py-1 text-sm"
+                        className="w-full border rounded px-2 py-1 text-sm bg-white text-black"
                         value={email}
                         onChange={e => setEmail(e.target.value)}
                         placeholder="Email"
@@ -192,7 +195,7 @@ function ContactRow({ contact, selected, onSelect, onUpdate }: { contact: any, s
                 </td>
                 <td className="px-4 py-3">
                     <input
-                        className="w-full border rounded px-2 py-1 text-sm"
+                        className="w-full border rounded px-2 py-1 text-sm bg-white text-black"
                         value={phone}
                         onChange={e => setPhone(e.target.value)}
                         placeholder="Phone"
@@ -200,9 +203,6 @@ function ContactRow({ contact, selected, onSelect, onUpdate }: { contact: any, s
                 </td>
                 <td className="px-4 py-3 text-muted-foreground text-xs">
                     (Services not editable)
-                </td>
-                <td className="px-4 py-3 text-muted-foreground text-xs">
-                    (Links not editable)
                 </td>
                 <td className="px-4 py-3 flex items-center space-x-1">
                     <button onClick={handleSave} disabled={saving} className="p-1 hover:bg-green-100 rounded text-green-600">
@@ -235,15 +235,6 @@ function ContactRow({ contact, selected, onSelect, onUpdate }: { contact: any, s
                 ) : (
                     <span className="text-xs text-muted-foreground">-</span>
                 )}
-            </td>
-            <td className="px-4 py-3">
-                <div className="flex flex-wrap gap-1">
-                    {contact.links && contact.links.map((link: string, i: number) => (
-                        <a key={i} href={link} target="_blank" rel="noreferrer" className="text-xs text-primary hover:underline bg-primary/10 px-1 rounded">
-                            Link {i + 1}
-                        </a>
-                    ))}
-                </div>
             </td>
             <td className="px-4 py-3 flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
                 <button

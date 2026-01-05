@@ -80,17 +80,20 @@ export default function ServicesTable() {
                             <th className="px-4 py-3 font-medium w-1/3">Description</th>
                             <th className="px-4 py-3 font-medium">Contact</th>
                             <th className="px-4 py-3 font-medium">Meeting</th>
-                            <th className="px-4 py-3 font-medium text-right">Actions</th>
                         </tr>
                     </thead>
                     <tbody className="divide-y divide-border">
                         {loading ? (
-                            <tr><td colSpan={5} className="p-4 text-center">Loading...</td></tr>
+                            <tr><td colSpan={4} className="p-4 text-center">Loading...</td></tr>
                         ) : services.length === 0 ? (
-                            <tr><td colSpan={5} className="p-4 text-center text-muted-foreground">No services found</td></tr>
+                            <tr><td colSpan={4} className="p-4 text-center text-muted-foreground">No services found</td></tr>
                         ) : (
                             services.map((service) => (
-                                <tr key={service.id} className="hover:bg-muted/50 group">
+                                <tr
+                                    key={service.id}
+                                    className="hover:bg-muted/50 group cursor-pointer transition-colors"
+                                    onClick={() => setEditService(service)}
+                                >
                                     <td className="px-4 py-3 align-top">
                                         <span className={`text-xs font-medium px-2 py-1 rounded-full ${service.type === 'offer' ? 'bg-green-100 text-green-800' : 'bg-blue-100 text-blue-800'
                                             }`}>
@@ -100,30 +103,28 @@ export default function ServicesTable() {
                                     <td className="px-4 py-3 align-top">
                                         <DescriptionCell service={service} />
                                     </td>
-                                    <td className="px-4 py-3 align-top">
+                                    <td className="px-4 py-3 align-top" onClick={e => e.stopPropagation()}>
                                         {service.contacts ? (
                                             <Link to={`/admin/contacts?search=${service.contacts.name}`} className="hover:underline text-primary">
                                                 {service.contacts.name || service.contacts.email || 'Unknown'}
                                             </Link>
                                         ) : (
-                                            <span className="text-muted-foreground italic flex items-center">
-                                                Unattributed
-                                            </span>
+                                            <div className="flex items-center gap-2">
+                                                <span className="text-muted-foreground italic">Unattributed</span>
+                                                <button
+                                                    onClick={(e) => {
+                                                        e.stopPropagation()
+                                                        setEditService(service)
+                                                    }}
+                                                    className="text-xs bg-red-100 text-red-600 px-2 py-0.5 rounded hover:bg-red-200"
+                                                >
+                                                    Assign
+                                                </button>
+                                            </div>
                                         )}
                                     </td>
                                     <td className="px-4 py-3 text-muted-foreground align-top">
                                         {service.meeting_chats?.meeting_name || 'Deleted'}
-                                    </td>
-                                    <td className="px-4 py-3 text-right align-top">
-                                        <button
-                                            onClick={() => setEditService(service)}
-                                            className={clsx(
-                                                "text-xs font-medium px-2 py-1 rounded hover:bg-primary/10 transition-colors",
-                                                !service.contacts ? "text-red-500 bg-red-50 hover:bg-red-100" : "text-primary opacity-0 group-hover:opacity-100"
-                                            )}
-                                        >
-                                            {!service.contacts ? "Assign" : "Edit"}
-                                        </button>
                                     </td>
                                 </tr>
                             ))
@@ -152,7 +153,13 @@ function DescriptionCell({ service }: { service: any }) {
         <div>
             <div className={clsx("text-sm", !expanded && "line-clamp-2")}>
                 {service.links && service.links.length > 0 ? (
-                    <a href={service.links[0]} target="_blank" rel="noopener noreferrer" className="hover:underline text-primary inline-flex items-center group">
+                    <a
+                        href={service.links[0]}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="hover:underline text-primary inline-flex items-center group"
+                        onClick={e => e.stopPropagation()}
+                    >
                         {service.description}
                         <ExternalLink className="h-3 w-3 ml-1 opacity-0 group-hover:opacity-100" />
                     </a>
@@ -162,7 +169,10 @@ function DescriptionCell({ service }: { service: any }) {
             </div>
             {isLong && (
                 <button
-                    onClick={() => setExpanded(!expanded)}
+                    onClick={(e) => {
+                        e.stopPropagation()
+                        setExpanded(!expanded)
+                    }}
                     className="text-[10px] text-muted-foreground hover:text-foreground mt-1"
                 >
                     {expanded ? "Show Less" : "Show More"}
