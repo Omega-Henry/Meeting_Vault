@@ -105,7 +105,7 @@ export default function UserContacts() {
                                                 <div className="flex flex-col gap-1 text-xs">
                                                     {offers.length > 0 && (
                                                         <Link
-                                                            to={`/offers?contact_id=${contact.id}`}
+                                                            to={`/app/offers?contact_id=${contact.id}`}
                                                             className="text-green-600 hover:underline font-medium"
                                                         >
                                                             {offers.length} Offers
@@ -113,7 +113,7 @@ export default function UserContacts() {
                                                     )}
                                                     {requests.length > 0 && (
                                                         <Link
-                                                            to={`/requests?contact_id=${contact.id}`}
+                                                            to={`/app/requests?contact_id=${contact.id}`}
                                                             className="text-blue-600 hover:underline font-medium"
                                                         >
                                                             {requests.length} Requests

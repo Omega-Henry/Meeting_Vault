@@ -225,7 +225,7 @@ function ContactRow({ contact, selected, onSelect, onUpdate }: { contact: any, s
             <td className="px-4 py-3">{contact.phone || '-'}</td>
             <td className="px-4 py-3">
                 {contact.services && contact.services.length > 0 ? (
-                    <Link to={`/services?contact_id=${contact.id}`} className="text-xs text-primary hover:underline flex items-center">
+                    <Link to={`/admin/services?contact_id=${contact.id}`} className="text-xs text-primary hover:underline flex items-center">
                         {contact.services.length} Services
                         <ExternalLink className="h-3 w-3 ml-1" />
                     </Link>

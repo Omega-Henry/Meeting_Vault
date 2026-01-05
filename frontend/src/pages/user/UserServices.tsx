@@ -152,7 +152,7 @@ export default function UserServices({ type }: UserServicesProps) {
                                         <td className="px-4 py-3">
                                             {item.contacts?.name ? (
                                                 <Link
-                                                    to={`/contacts?search=${encodeURIComponent(item.contacts.name)}`}
+                                                    to={`/app/contacts?search=${encodeURIComponent(item.contacts.name)}`}
                                                     className="hover:underline text-primary"
                                                     onClick={(e) => e.stopPropagation()}
                                                 >

@@ -91,7 +91,7 @@ export default function ServicesTable() {
                                     </td>
                                     <td className="px-4 py-3">
                                         {service.contacts ? (
-                                            <Link to={`/contacts?search=${service.contacts.name}`} className="hover:underline text-primary">
+                                            <Link to={`/admin/contacts?search=${service.contacts.name}`} className="hover:underline text-primary">
                                                 {service.contacts.name || service.contacts.email || 'Unknown'}
                                             </Link>
                                         ) : 'Unknown'}
