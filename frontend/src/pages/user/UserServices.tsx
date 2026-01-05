@@ -223,9 +223,8 @@ export default function UserServices({ type }: UserServicesProps) {
             <ChangeRequestModal
                 isOpen={modalOpen}
                 onClose={() => setModalOpen(false)}
-                targetType="service"
-                targetId={selectedItem?.id}
-                initialData={selectedItem}
+                type="service"
+                target={selectedItem}
             />
         </div>
     )

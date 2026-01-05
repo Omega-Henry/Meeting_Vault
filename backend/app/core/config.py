@@ -9,8 +9,10 @@ class Settings(BaseSettings):
     OPENROUTER_API_KEY: Optional[str] = None
     OPENROUTER_BASE_URL: str = "https://openrouter.ai/api/v1"
     LLM_MODEL: str = "openai/gpt-4o-mini" # OpenRouter model name
-    ADMIN_EMAILS: str = "" # Comma-separated list of admin emails, loaded from .env
+    ADMIN_EMAIL: str = "" # Single admin email
+    ADMIN_EMAILS: str = "" # Comma-separated list (legacy support)
     class Config:
         env_file = ".env"
+        extra = "ignore"
 
 settings = Settings()

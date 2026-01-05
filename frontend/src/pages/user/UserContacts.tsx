@@ -161,9 +161,8 @@ export default function UserContacts() {
             <ChangeRequestModal
                 isOpen={modalOpen}
                 onClose={() => setModalOpen(false)}
-                targetType="contact"
-                targetId={selectedItem?.id}
-                initialData={selectedItem}
+                type="contact"
+                target={selectedItem}
             />
         </div>
     )

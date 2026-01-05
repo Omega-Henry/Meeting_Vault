@@ -9,6 +9,8 @@ interface Message {
     data?: any
 }
 
+import ChangeRequestModal from './ChangeRequestModal'
+
 export default function AssistantPanel() {
     const [messages, setMessages] = useState<Message[]>([
         { role: 'assistant', content: 'Hello! I can help you find meetings, contacts, or services. What are you looking for?' }
@@ -16,6 +18,17 @@ export default function AssistantPanel() {
     const [input, setInput] = useState('')
     const [loading, setLoading] = useState(false)
     const scrollRef = useRef<HTMLDivElement>(null)
+
+    // Edit Modal State
+    const [editTarget, setEditTarget] = useState<any>(null)
+    const [editType, setEditType] = useState<'contact' | 'service'>('contact')
+    const [isEditModalOpen, setEditModalOpen] = useState(false)
+
+    const handleEditClick = (target: any, type: 'contact' | 'service') => {
+        setEditTarget(target)
+        setEditType(type)
+        setEditModalOpen(true)
+    }
 
     useEffect(() => {
         if (scrollRef.current) {
@@ -102,11 +115,81 @@ export default function AssistantPanel() {
                                     {msg.data.intent === 'search_contacts' && Array.isArray(msg.data.data) && (
                                         <div className="space-y-2">
                                             <p className="text-xs font-semibold opacity-70">Found {msg.data.count} contacts:</p>
-                                            {msg.data.data.map((contact: any) => (
-                                                <div key={contact.id} className="text-xs bg-background/50 p-2 rounded">
-                                                    {contact.name || contact.email}
+                                            <div className="max-h-60 overflow-y-auto space-y-2">
+                                                {msg.data.data.map((contact: any) => (
+                                                    <div key={contact.id} className="text-xs bg-background/50 p-2 rounded flex justify-between items-center group">
+                                                        <div>
+                                                            <div className="font-medium">{contact.name || 'Unknown Name'}</div>
+                                                            <div className="text-[10px] opacity-70">{contact.email}</div>
+                                                            <div className="text-[10px] opacity-70">{contact.phone}</div>
+                                                        </div>
+                                                        <button
+                                                            className="opacity-0 group-hover:opacity-100 text-[10px] bg-primary/10 hover:bg-primary/20 text-primary px-2 py-1 rounded transition-opacity"
+                                                            onClick={() => handleEditClick(contact, 'contact')}
+                                                        >
+                                                            Edit
+                                                        </button>
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        </div>
+                                    )}
+
+                                    {msg.data.intent === 'list_services' && Array.isArray(msg.data.data) && (
+                                        <div className="space-y-2">
+                                            <p className="text-xs font-semibold opacity-70">Found {msg.data.count} services:</p>
+                                            <div className="max-h-60 overflow-y-auto space-y-2">
+                                                {msg.data.data.map((service: any) => (
+                                                    <div key={service.id} className="text-xs bg-background/50 p-2 rounded border-l-2 border-primary">
+                                                        <div className="flex justify-between">
+                                                            <span className={clsx("uppercase text-[10px] px-1 rounded", service.type === 'offer' ? "bg-green-500/10 text-green-500" : "bg-blue-500/10 text-blue-500")}>
+                                                                {service.type}
+                                                            </span>
+                                                            <span className="text-[10px] opacity-50">{service.contacts?.name}</span>
+                                                        </div>
+                                                        <div className="mt-1">{service.description}</div>
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        </div>
+                                    )}
+
+                                    {msg.data.intent === 'search_everything' && msg.data.data && (
+                                        <div className="space-y-3">
+                                            {/* Contacts */}
+                                            {msg.data.data.contacts?.length > 0 && (
+                                                <div>
+                                                    <p className="text-[10px] font-bold uppercase opacity-50 mb-1">Contacts ({msg.data.data.contacts.length})</p>
+                                                    <div className="space-y-1">
+                                                        {msg.data.data.contacts.slice(0, 3).map((c: any) => (
+                                                            <div key={c.id} className="text-xs bg-background/50 p-1.5 rounded">{c.name || c.email}</div>
+                                                        ))}
+                                                        {msg.data.data.contacts.length > 3 && <div className="text-[10px] text-center opacity-50">...and {msg.data.data.contacts.length - 3} more</div>}
+                                                    </div>
                                                 </div>
-                                            ))}
+                                            )}
+                                            {/* Services */}
+                                            {msg.data.data.services?.length > 0 && (
+                                                <div>
+                                                    <p className="text-[10px] font-bold uppercase opacity-50 mb-1">Services ({msg.data.data.services.length})</p>
+                                                    <div className="space-y-1">
+                                                        {msg.data.data.services.slice(0, 3).map((s: any) => (
+                                                            <div key={s.id} className="text-xs bg-background/50 p-1.5 rounded truncate">{s.description}</div>
+                                                        ))}
+                                                    </div>
+                                                </div>
+                                            )}
+                                            {/* Chats */}
+                                            {msg.data.data.chats?.length > 0 && (
+                                                <div>
+                                                    <p className="text-[10px] font-bold uppercase opacity-50 mb-1">Chats ({msg.data.data.chats.length})</p>
+                                                    <div className="space-y-1">
+                                                        {msg.data.data.chats.slice(0, 3).map((c: any) => (
+                                                            <div key={c.id} className="text-xs bg-background/50 p-1.5 rounded">{c.meeting_name}</div>
+                                                        ))}
+                                                    </div>
+                                                </div>
+                                            )}
                                         </div>
                                     )}
                                     {/* Add more UI renderers as needed */}
@@ -142,6 +225,14 @@ export default function AssistantPanel() {
                     </button>
                 </form>
             </div>
+            {editTarget && (
+                <ChangeRequestModal
+                    isOpen={isEditModalOpen}
+                    onClose={() => setEditModalOpen(false)}
+                    target={editTarget}
+                    type={editType}
+                />
+            )}
         </div>
     )
 }
