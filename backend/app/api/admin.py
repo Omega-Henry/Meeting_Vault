@@ -236,15 +236,27 @@ def search_contacts(
     """
     Admin search: looks at name, email, phone, and links.
     """
-    # Supabase/PostgREST syntax for OR across multiple columns
-    # or=(col1.ilike.val,col2.ilike.val)
-    # Note: 'links' is an array, so we need different syntax or text cast
-    # Assuming 'links' is text[]
-    
-    # Simplified: Search name/email/phone (links is harder in simple query without specialized index/extensions)
-    # We will try to cast to text for simple search if possible, or just skip links for MVP efficiency
-    
     filter_str = f"name.ilike.%{q}%,email.ilike.%{q}%,phone.ilike.%{q}%"
     res = client.table("contacts").select("*").or_(filter_str).eq("org_id", ctx.org_id).limit(20).execute()
     return res.data
+
+@router.patch("/services/{service_id}", response_model=dict)
+def update_service(
+    service_id: str,
+    payload: Dict[str, Any] = Body(...),
+    ctx: UserContext = Depends(require_admin),
+    client: Client = Depends(get_supabase_client)
+):
+    """
+    Directly update a service's fields (Admin only).
+    Useful for reassigning contact_id.
+    """
+    allowed = {"description", "contact_id", "type"} 
+    update_data = {k: v for k, v in payload.items() if k in allowed}
+    
+    if not update_data:
+        raise HTTPException(status_code=400, detail="No valid fields to update")
+        
+    client.table("services").update(update_data).eq("id", service_id).execute()
+    return {"status": "success"}
 

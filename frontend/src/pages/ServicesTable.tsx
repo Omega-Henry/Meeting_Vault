@@ -2,6 +2,8 @@ import { useEffect, useState } from 'react'
 import { supabase } from '../lib/supabase'
 import { Link, useSearchParams } from 'react-router-dom'
 import { X, ExternalLink } from 'lucide-react'
+import clsx from 'clsx'
+import ServiceEditModal from '../components/ServiceEditModal'
 
 export default function ServicesTable() {
     const [services, setServices] = useState<any[]>([])
@@ -37,6 +39,14 @@ export default function ServicesTable() {
         setSearchParams({})
     }
 
+    const [editService, setEditService] = useState<any>(null)
+
+    const onUpdate = () => {
+        // Trigger re-fetch (hacky but works for now)
+        setFilter(prev => prev)
+        window.location.reload() // safest for now to ensure all relations update
+    }
+
     return (
         <div className="space-y-6">
             <div className="flex items-center justify-between">
@@ -67,44 +77,53 @@ export default function ServicesTable() {
                     <thead className="bg-muted/50 text-muted-foreground">
                         <tr>
                             <th className="px-4 py-3 font-medium">Type</th>
-                            <th className="px-4 py-3 font-medium">Description</th>
+                            <th className="px-4 py-3 font-medium w-1/3">Description</th>
                             <th className="px-4 py-3 font-medium">Contact</th>
                             <th className="px-4 py-3 font-medium">Meeting</th>
+                            <th className="px-4 py-3 font-medium text-right">Actions</th>
                         </tr>
                     </thead>
                     <tbody className="divide-y divide-border">
                         {loading ? (
-                            <tr><td colSpan={4} className="p-4 text-center">Loading...</td></tr>
+                            <tr><td colSpan={5} className="p-4 text-center">Loading...</td></tr>
                         ) : services.length === 0 ? (
-                            <tr><td colSpan={4} className="p-4 text-center text-muted-foreground">No services found</td></tr>
+                            <tr><td colSpan={5} className="p-4 text-center text-muted-foreground">No services found</td></tr>
                         ) : (
                             services.map((service) => (
-                                <tr key={service.id} className="hover:bg-muted/50">
-                                    <td className="px-4 py-3">
+                                <tr key={service.id} className="hover:bg-muted/50 group">
+                                    <td className="px-4 py-3 align-top">
                                         <span className={`text-xs font-medium px-2 py-1 rounded-full ${service.type === 'offer' ? 'bg-green-100 text-green-800' : 'bg-blue-100 text-blue-800'
                                             }`}>
                                             {service.type.toUpperCase()}
                                         </span>
                                     </td>
-                                    <td className="px-4 py-3 max-w-md truncate" title={service.description}>
-                                        {service.links && service.links.length > 0 ? (
-                                            <a href={service.links[0]} target="_blank" rel="noopener noreferrer" className="hover:underline text-primary flex items-center group">
-                                                {service.description}
-                                                <ExternalLink className="h-3 w-3 ml-1 opacity-0 group-hover:opacity-100" />
-                                            </a>
-                                        ) : (
-                                            service.description
-                                        )}
+                                    <td className="px-4 py-3 align-top">
+                                        <DescriptionCell service={service} />
                                     </td>
-                                    <td className="px-4 py-3">
+                                    <td className="px-4 py-3 align-top">
                                         {service.contacts ? (
                                             <Link to={`/admin/contacts?search=${service.contacts.name}`} className="hover:underline text-primary">
                                                 {service.contacts.name || service.contacts.email || 'Unknown'}
                                             </Link>
-                                        ) : 'Unknown'}
+                                        ) : (
+                                            <span className="text-muted-foreground italic flex items-center">
+                                                Unattributed
+                                            </span>
+                                        )}
                                     </td>
-                                    <td className="px-4 py-3 text-muted-foreground">
+                                    <td className="px-4 py-3 text-muted-foreground align-top">
                                         {service.meeting_chats?.meeting_name || 'Deleted'}
+                                    </td>
+                                    <td className="px-4 py-3 text-right align-top">
+                                        <button
+                                            onClick={() => setEditService(service)}
+                                            className={clsx(
+                                                "text-xs font-medium px-2 py-1 rounded hover:bg-primary/10 transition-colors",
+                                                !service.contacts ? "text-red-500 bg-red-50 hover:bg-red-100" : "text-primary opacity-0 group-hover:opacity-100"
+                                            )}
+                                        >
+                                            {!service.contacts ? "Assign" : "Edit"}
+                                        </button>
                                     </td>
                                 </tr>
                             ))
@@ -112,6 +131,45 @@ export default function ServicesTable() {
                     </tbody>
                 </table>
             </div>
+
+            {editService && (
+                <ServiceEditModal
+                    isOpen={!!editService}
+                    onClose={() => setEditService(null)}
+                    service={editService}
+                    onUpdateComplete={onUpdate}
+                />
+            )}
         </div>
     )
 }
+
+function DescriptionCell({ service }: { service: any }) {
+    const [expanded, setExpanded] = useState(false)
+    const isLong = service.description && service.description.length > 100
+
+    return (
+        <div>
+            <div className={clsx("text-sm", !expanded && "line-clamp-2")}>
+                {service.links && service.links.length > 0 ? (
+                    <a href={service.links[0]} target="_blank" rel="noopener noreferrer" className="hover:underline text-primary inline-flex items-center group">
+                        {service.description}
+                        <ExternalLink className="h-3 w-3 ml-1 opacity-0 group-hover:opacity-100" />
+                    </a>
+                ) : (
+                    service.description
+                )}
+            </div>
+            {isLong && (
+                <button
+                    onClick={() => setExpanded(!expanded)}
+                    className="text-[10px] text-muted-foreground hover:text-foreground mt-1"
+                >
+                    {expanded ? "Show Less" : "Show More"}
+                </button>
+            )}
+        </div>
+    )
+}
+
+
