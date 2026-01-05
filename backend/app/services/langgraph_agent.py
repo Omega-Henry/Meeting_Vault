@@ -1,5 +1,6 @@
 from typing import Annotated, TypedDict, Union, List, Dict, Any
 from langgraph.graph import StateGraph, END
+from langgraph.graph.message import add_messages
 from langchain_core.messages import BaseMessage, HumanMessage, AIMessage, SystemMessage, ToolMessage
 from langchain_openai import ChatOpenAI
 from langchain_core.tools import tool
@@ -10,7 +11,7 @@ import json
 
 # State definition
 class AgentState(TypedDict):
-    messages: List[BaseMessage]
+    messages: Annotated[List[BaseMessage], add_messages]
     user_id: str
     intent: str
     tool_calls: List[Dict[str, Any]]
