@@ -1,6 +1,6 @@
 import { } from 'react'
 import { Routes, Route, Link, useLocation } from 'react-router-dom'
-import { LayoutDashboard, MessageSquare, Users, Link as LinkIcon, Search, LogOut, CheckSquare } from 'lucide-react'
+import { LayoutDashboard, MessageSquare, Users, Link as LinkIcon, Search, LogOut, CheckSquare, Database } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import clsx from 'clsx'
 import AssistantPanel from '../components/AssistantPanel'
@@ -12,6 +12,7 @@ import ServicesTable from '../pages/ServicesTable'
 import LinksTable from '../pages/LinksTable'
 import GlobalSearch from '../pages/GlobalSearch'
 import RequestsTable from '../pages/admin/RequestsTable'
+import DatabaseEditor from '../pages/admin/DatabaseEditor'
 import { useUserProfile } from '../hooks/useUserContext'
 
 export default function AdminLayout() {
@@ -25,6 +26,7 @@ export default function AdminLayout() {
         { name: 'Contacts', href: '/admin/contacts', icon: Users },
         { name: 'Services', href: '/admin/services', icon: LayoutDashboard },
         { name: 'Links', href: '/admin/links', icon: LinkIcon },
+        { name: 'Database', href: '/admin/database', icon: Database },
         { name: 'Search', href: '/admin/search', icon: Search },
     ]
 
@@ -82,6 +84,7 @@ export default function AdminLayout() {
                     <Route path="/" element={<ChatList />} />
                     <Route path="chats/:id" element={<ChatDetail />} />
                     <Route path="requests" element={<RequestsTable />} />
+                    <Route path="database" element={<DatabaseEditor />} />
                     <Route path="contacts" element={<ContactsTable />} />
                     <Route path="services" element={<ServicesTable />} />
                     <Route path="links" element={<LinksTable />} />

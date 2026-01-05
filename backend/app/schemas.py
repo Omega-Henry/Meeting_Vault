@@ -40,3 +40,15 @@ class MeetingChatResponse(MeetingChatBase):
 class ExtractedData(BaseModel):
     contacts: List[ContactBase]
     services: List[ServiceBase]
+
+class MergeSuggestion(BaseModel):
+    suggestion_id: str
+    contact_ids: List[str]
+    confidence: str # 'High', 'Medium', 'Low'
+    reasons: List[str]
+    proposed_primary_contact_id: Optional[str] = None
+    
+class MergeRequest(BaseModel):
+    primary_contact_id: str
+    duplicate_contact_ids: List[str]
+

@@ -1,0 +1,82 @@
+[
+    {
+        "id": "msg_001",
+        "sender": "Angela Robinson",
+        "timestamp": "2025-11-08 09:24:20",
+        "content": "What are your funding requirements?",
+        "classification": "request",
+        "expected_service": {
+            "service_type": "request",
+            "description": "What are your funding requirements?"
+        }
+    },
+    {
+        "id": "msg_005",
+        "sender": "Micah Wylie TC 3852082523",
+        "timestamp": "2025-11-08 09:24:43",
+        "content": "Hey Creative Fam! I’m a Top Tier Transaction Coordinator. Let our team make sure you make it to closing! https://blinq.me/gtnogsHvRhFA",
+        "classification": "offer",
+        "expected_service": {
+            "service_type": "offer",
+            "description": "Hey Creative Fam! I’m a Top Tier Transaction Coordinator. Let our team make sure you make it to closing! https://blinq.me/gtnogsHvRhFA"
+        },
+        "expected_contact": {
+            "name": "Micah Wylie",
+            "phone": "3852082523",
+            "links": [
+                "https://blinq.me/gtnogsHvRhFA"
+            ]
+        }
+    },
+    {
+        "id": "msg_009",
+        "sender": "Wendi Rook 503.689.7182",
+        "timestamp": "2025-11-08 09:25:54",
+        "content": "Anyone looking to sell their deals for cash in these areas - our FUND is buying, close in 14 days, get in touch! wendirook@gmail.com",
+        "classification": "offer",
+        "expected_service": {
+            "service_type": "offer",
+            "description": "Anyone looking to sell their deals for cash in these areas - our FUND is buying, close in 14 days, get in touch! wendirook@gmail.com"
+        },
+        "expected_contact": {
+            "name": "Wendi Rook",
+            "phone": "503.689.7182",
+            "email": "wendirook@gmail.com"
+        }
+    },
+    {
+        "id": "msg_011",
+        "sender": "June Cena",
+        "timestamp": "2025-11-08 09:26:12",
+        "content": "Investors, I can help you in business acquisition and funding. Let's connect: https://blinq.me/cm95y7ilv0bd7s60lcgqm8yy1",
+        "classification": "offer",
+        "expected_service": {
+            "service_type": "offer",
+            "description": "Investors, I can help you in business acquisition and funding. Let's connect: https://blinq.me/cm95y7ilv0bd7s60lcgqm8yy1"
+        },
+        "expected_contact": {
+            "name": "June Cena",
+            "links": [
+                "https://blinq.me/cm95y7ilv0bd7s60lcgqm8yy1"
+            ]
+        }
+    },
+    {
+        "id": "msg_012",
+        "sender": "Peymon Hashimoto",
+        "timestamp": "2025-11-08 09:26:15",
+        "content": "I am looking for a TC to join my team in Idaho \nDm me if interested",
+        "classification": "request",
+        "expected_service": {
+            "service_type": "request",
+            "description": "I am looking for a TC to join my team in Idaho \nDm me if interested"
+        }
+    },
+    {
+        "id": "msg_014",
+        "sender": "Dr. Tami Romriell  208-589-7775",
+        "timestamp": "2025-11-08 09:24:39",
+        "content": "Nope",
+        "classification": "noise"
+    }
+]
