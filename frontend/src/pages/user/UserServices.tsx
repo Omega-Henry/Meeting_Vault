@@ -1,6 +1,6 @@
 
 import { useEffect, useState } from 'react'
-import { useSearchParams } from 'react-router-dom'
+import { useSearchParams, Link } from 'react-router-dom'
 import { supabase } from '../../lib/supabase'
 import { Search } from 'lucide-react'
 import ChangeRequestModal from '../../components/ChangeRequestModal'
@@ -12,8 +12,9 @@ interface UserServicesProps {
 export default function UserServices({ type }: UserServicesProps) {
     const [services, setServices] = useState<any[]>([])
     const [loading, setLoading] = useState(true)
-    const [searchParams] = useSearchParams()
+    const [searchParams, setSearchParams] = useSearchParams()
     const [search, setSearch] = useState(searchParams.get('q') || searchParams.get('search') || '')
+    const contactId = searchParams.get('contact_id')
 
     // Modal
     const [modalOpen, setModalOpen] = useState(false)
@@ -21,7 +22,7 @@ export default function UserServices({ type }: UserServicesProps) {
 
     useEffect(() => {
         fetchServices()
-    }, [type, search])
+    }, [type, search, contactId])
 
     const fetchServices = async () => {
         setLoading(true)
@@ -31,6 +32,9 @@ export default function UserServices({ type }: UserServicesProps) {
         let url = `${import.meta.env.VITE_API_BASE_URL || ''}/api/directory/services?type=${type}&limit=100`
         if (search) {
             url += `&q=${encodeURIComponent(search)}`
+        }
+        if (contactId) {
+            url += `&contact_id=${contactId}`
         }
 
         const res = await fetch(url, {
@@ -51,13 +55,28 @@ export default function UserServices({ type }: UserServicesProps) {
         setModalOpen(true)
     }
 
+    const clearContactFilter = () => {
+        setSearchParams({})
+    }
+
     const title = type === 'offer' ? 'Directory Offers' : 'Directory Requests'
     const thType = type === 'offer' ? 'Provider' : 'Requester'
 
     return (
         <div className="space-y-6">
             <div className="flex items-center justify-between">
-                <h1 className="text-3xl font-bold">{title}</h1>
+                <div className="space-y-1">
+                    <h1 className="text-3xl font-bold">{title}</h1>
+                    {contactId && (
+                        <div className="flex items-center text-sm text-muted-foreground bg-muted/50 px-2 py-1 rounded w-fit">
+                            <span className="mr-2">Filtered by Contact</span>
+                            <button onClick={clearContactFilter} className="hover:text-destructive flex items-center">
+                                Clear
+                                <span className="sr-only">Clear filter</span>
+                            </button>
+                        </div>
+                    )}
+                </div>
             </div>
 
             <div className="flex items-center space-x-2">
@@ -131,7 +150,17 @@ export default function UserServices({ type }: UserServicesProps) {
                                             )}
                                         </td>
                                         <td className="px-4 py-3">
-                                            {item.contacts?.name || item.contact_name || 'Unknown'}
+                                            {item.contacts?.name ? (
+                                                <Link
+                                                    to={`/contacts?search=${encodeURIComponent(item.contacts.name)}`}
+                                                    className="hover:underline text-primary"
+                                                    onClick={(e) => e.stopPropagation()}
+                                                >
+                                                    {item.contacts.name}
+                                                </Link>
+                                            ) : (
+                                                item.contacts?.name || item.contact_name || 'Unknown'
+                                            )}
                                             <div className="text-xs text-muted-foreground">{item.contacts?.email}</div>
                                         </td>
                                         <td className="px-4 py-3 text-right">

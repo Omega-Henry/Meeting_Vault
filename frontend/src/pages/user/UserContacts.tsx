@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { useSearchParams } from 'react-router-dom'
+import { useSearchParams, Link } from 'react-router-dom'
 import { supabase } from '../../lib/supabase'
 import { Search } from 'lucide-react'
 import ChangeRequestModal from '../../components/ChangeRequestModal'
@@ -73,6 +73,7 @@ export default function UserContacts() {
                                 <th className="px-4 py-3">Name</th>
                                 <th className="px-4 py-3">Email</th>
                                 <th className="px-4 py-3">Phone</th>
+                                <th className="px-4 py-3">Services</th>
                                 <th className="px-4 py-3">Links</th>
                                 <th className="px-4 py-3 text-right">Actions</th>
                             </tr>
@@ -80,51 +81,77 @@ export default function UserContacts() {
                         <tbody className="divide-y divide-border">
                             {loading ? (
                                 <tr>
-                                    <td colSpan={5} className="px-4 py-8 text-center text-muted-foreground">
+                                    <td colSpan={6} className="px-4 py-8 text-center text-muted-foreground">
                                         Loading contacts...
                                     </td>
                                 </tr>
                             ) : contacts.length === 0 ? (
                                 <tr>
-                                    <td colSpan={5} className="px-4 py-8 text-center text-muted-foreground">
+                                    <td colSpan={6} className="px-4 py-8 text-center text-muted-foreground">
                                         No contacts found.
                                     </td>
                                 </tr>
                             ) : (
-                                contacts.map((contact) => (
-                                    <tr key={contact.id} className="hover:bg-muted/50 transition-colors">
-                                        <td className="px-4 py-3 font-medium">{contact.name || 'Unknown'}</td>
-                                        <td className="px-4 py-3">{contact.email || '-'}</td>
-                                        <td className="px-4 py-3">{contact.phone || '-'}</td>
-                                        <td className="px-4 py-3">
-                                            {contact.links && contact.links.length > 0 ? (
-                                                <div className="flex flex-wrap gap-2">
-                                                    {contact.links.map((link: string, i: number) => (
-                                                        <a
-                                                            key={i}
-                                                            href={link}
-                                                            target="_blank"
-                                                            rel="noopener noreferrer"
-                                                            className="text-xs text-blue-500 hover:underline truncate max-w-[150px] inline-block"
+                                contacts.map((contact) => {
+                                    const offers = contact.services?.filter((s: any) => s.type === 'offer') || []
+                                    const requests = contact.services?.filter((s: any) => s.type === 'request') || []
+
+                                    return (
+                                        <tr key={contact.id} className="hover:bg-muted/50 transition-colors">
+                                            <td className="px-4 py-3 font-medium">{contact.name || 'Unknown'}</td>
+                                            <td className="px-4 py-3">{contact.email || '-'}</td>
+                                            <td className="px-4 py-3">{contact.phone || '-'}</td>
+                                            <td className="px-4 py-3">
+                                                <div className="flex flex-col gap-1 text-xs">
+                                                    {offers.length > 0 && (
+                                                        <Link
+                                                            to={`/offers?contact_id=${contact.id}`}
+                                                            className="text-green-600 hover:underline font-medium"
                                                         >
-                                                            {link}
-                                                        </a>
-                                                    ))}
+                                                            {offers.length} Offers
+                                                        </Link>
+                                                    )}
+                                                    {requests.length > 0 && (
+                                                        <Link
+                                                            to={`/requests?contact_id=${contact.id}`}
+                                                            className="text-blue-600 hover:underline font-medium"
+                                                        >
+                                                            {requests.length} Requests
+                                                        </Link>
+                                                    )}
+                                                    {offers.length === 0 && requests.length === 0 && <span className="text-muted-foreground">-</span>}
                                                 </div>
-                                            ) : (
-                                                <span className="text-muted-foreground text-xs">-</span>
-                                            )}
-                                        </td>
-                                        <td className="px-4 py-3 text-right">
-                                            <button
-                                                onClick={() => openSuggestModal(contact)}
-                                                className="text-xs text-primary hover:underline"
-                                            >
-                                                Suggest Edit
-                                            </button>
-                                        </td>
-                                    </tr>
-                                ))
+                                            </td>
+                                            <td className="px-4 py-3">
+                                                {contact.links && contact.links.length > 0 ? (
+                                                    <div className="flex flex-wrap gap-2">
+                                                        {contact.links.map((link: string, i: number) => (
+                                                            <a
+                                                                key={i}
+                                                                href={link}
+                                                                target="_blank"
+                                                                rel="noopener noreferrer"
+                                                                className="text-xs text-blue-500 hover:underline truncate max-w-[150px] inline-block"
+                                                            >
+                                                                {link}
+                                                            </a>
+                                                        ))}
+                                                    </div>
+                                                ) : (
+                                                    <span className="text-muted-foreground text-xs">-</span>
+                                                )}
+                                            </td>
+                                            <td className="px-4 py-3 text-right">
+                                                <button
+                                                    onClick={() => openSuggestModal(contact)}
+                                                    className="text-xs text-primary hover:underline"
+                                                >
+                                                    Suggest Edit
+                                                </button>
+                                            </td>
+                                        </tr>
+                                    )
+                                })
                             )}
                         </tbody>
                     </table>

@@ -1,4 +1,5 @@
-from fastapi import APIRouter, UploadFile, File, Depends, HTTPException, status, BackgroundTasks
+from fastapi import APIRouter, UploadFile, File, Depends, HTTPException, status, BackgroundTasks, Form
+from typing import Optional
 from supabase import Client, create_client
 from app.dependencies import get_supabase_client, get_user_context, security, UserContext
 from app.services.ingestion import clean_text, compute_hash
@@ -114,6 +115,7 @@ async def process_extraction_background(chat_id: str, user_id: str, org_id: str,
 @router.post("/upload-meeting-chat", response_model=dict)
 async def upload_meeting_chat(
     background_tasks: BackgroundTasks,
+    meeting_name: Optional[str] = Form(None),
     file: UploadFile = File(...),
     client: Client = Depends(get_supabase_client),
     ctx: UserContext = Depends(get_user_context),
@@ -142,7 +144,7 @@ async def upload_meeting_chat(
         "user_id": user_id,
         "org_id": org_id,
         "telegram_chat_id": "unknown", 
-        "meeting_name": file.filename or "Untitled Meeting",
+        "meeting_name": meeting_name or file.filename or "Untitled Meeting",
         "chat_hash": chat_hash,
         "cleaned_text": cleaned_text,
         "digest_bullets": {"summary": "Processing...", "key_topics": []} # Placeholder

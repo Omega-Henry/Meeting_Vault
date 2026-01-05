@@ -9,6 +9,11 @@ export default function ChatList() {
     const [loading, setLoading] = useState(true)
     const [uploading, setUploading] = useState(false)
 
+    // Upload Modal State
+    const [showUploadModal, setShowUploadModal] = useState(false)
+    const [selectedFile, setSelectedFile] = useState<File | null>(null)
+    const [meetingName, setMeetingName] = useState('')
+
     const fetchChats = async () => {
         const { data, error } = await supabase
             .from('meeting_chats')
@@ -27,13 +32,28 @@ export default function ChatList() {
         fetchChats()
     }, [])
 
-    const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
         const file = e.target.files?.[0]
         if (!file) return
 
+        setSelectedFile(file)
+        // Default name: remove extension
+        setMeetingName(file.name.replace(/\.[^/.]+$/, ""))
+        setShowUploadModal(true)
+
+        // Reset input value so same file can be selected again if cancelled
+        e.target.value = ''
+    }
+
+    const confirmUpload = async () => {
+        if (!selectedFile) return
+
         setUploading(true)
+        setShowUploadModal(false)
+
         const formData = new FormData()
-        formData.append('file', file)
+        formData.append('file', selectedFile)
+        formData.append('meeting_name', meetingName)
 
         try {
             const { data: { session } } = await supabase.auth.getSession()
@@ -58,6 +78,7 @@ export default function ChatList() {
             alert('Upload failed')
         } finally {
             setUploading(false)
+            setSelectedFile(null)
         }
     }
 
@@ -73,7 +94,7 @@ export default function ChatList() {
                         id="file-upload"
                         className="hidden"
                         accept=".txt,.md"
-                        onChange={handleFileUpload}
+                        onChange={handleFileSelect}
                         disabled={uploading}
                     />
                     <label
@@ -96,7 +117,7 @@ export default function ChatList() {
                             to={`/admin/chats/${chat.id}`}
                             className={`group relative flex flex-col justify-between rounded-lg border p-6 transition-colors ${isProcessing ? 'bg-muted/30 cursor-wait' : 'hover:bg-muted/50'
                                 }`}
-                            onClick={(e) => isProcessing && e.preventDefault()} // Prevent click if processing? Maybe user wants to see raw text? Let's allow click but show status.
+                            onClick={(e) => isProcessing && e.preventDefault()}
                         >
                             <div className="space-y-2">
                                 <div className="flex items-center justify-between">
@@ -131,6 +152,41 @@ export default function ChatList() {
                     </div>
                 )}
             </div>
+
+            {/* Upload Modal */}
+            {showUploadModal && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50">
+                    <div className="bg-background rounded-lg shadow-lg w-full max-w-sm p-6 space-y-4">
+                        <h2 className="text-lg font-semibold">Upload Meeting</h2>
+                        <div className="space-y-2">
+                            <label className="text-sm font-medium">Meeting Name</label>
+                            <input
+                                type="text"
+                                className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                                value={meetingName}
+                                onChange={(e) => setMeetingName(e.target.value)}
+                            />
+                        </div>
+                        <div className="flex justify-end gap-2 pt-2">
+                            <button
+                                onClick={() => {
+                                    setShowUploadModal(false)
+                                    setSelectedFile(null)
+                                }}
+                                className="px-4 py-2 text-sm font-medium border rounded-md hover:bg-muted"
+                            >
+                                Cancel
+                            </button>
+                            <button
+                                onClick={confirmUpload}
+                                className="px-4 py-2 text-sm font-medium bg-primary text-primary-foreground rounded-md hover:bg-primary/90"
+                            >
+                                Upload
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
         </div>
     )
 }

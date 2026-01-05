@@ -17,7 +17,7 @@ def list_contacts(
     """
     List contacts in the user's organization.
     """
-    query = client.table("contacts").select("*").eq("org_id", ctx.org_id)
+    query = client.table("contacts").select("*, services(id, type)").eq("org_id", ctx.org_id)
     
     if q:
         # Simple ILIKE search on name or email
@@ -32,6 +32,7 @@ def list_services(
     client: Client = Depends(get_supabase_client),
     type: Optional[str] = None, # 'offer' or 'request'
     q: Optional[str] = None,
+    contact_id: Optional[str] = None,
     limit: int = 50,
     offset: int = 0
 ):
@@ -44,6 +45,9 @@ def list_services(
     if type:
         query = query.eq("type", type)
         
+    if contact_id:
+        query = query.eq("contact_id", contact_id)
+
     if q:
         query = query.ilike("description", f"%{q}%")
         
