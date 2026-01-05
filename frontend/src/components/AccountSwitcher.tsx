@@ -15,11 +15,17 @@ export default function AccountSwitcher() {
         setIsOpen(false)
     }
 
-    const handleAddAccount = async () => {
-        // Sign out from Supabase to allow new login, but KEEP current session in storage
-        // AND use scope: 'local' to ensure we do NOT revoke the token on the server!
-        await signOut({ keepStorage: true, scope: 'local' })
-        // Redirect to login (Supabase auth change might handle this, but explicit is safer)
+    const handleAddAccount = () => {
+        // Manually clear Supabase session from storage without notifying server
+        // This is safer than signOut({ scope: 'local' }) which might still trigger side effects
+        // or be mishandled by the client, causing token revocation.
+        Object.keys(localStorage).forEach(key => {
+            if (key.startsWith('sb-') && key.endsWith('-auth-token')) {
+                localStorage.removeItem(key)
+            }
+        })
+
+        // Force reload to reset Supabase client state
         window.location.href = '/login'
     }
 

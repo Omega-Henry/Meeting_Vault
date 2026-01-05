@@ -13,6 +13,7 @@ interface SavedSession {
     access_token: string
     refresh_token: string
     user_id: string
+    storageKey?: string
 }
 
 interface UserContextType {
@@ -67,14 +68,18 @@ export function useUserProfile() {
             return
         }
 
-        console.log(`[Auth] Updating session for ${session.user.email}. RT: ...${session.refresh_token.slice(-5)}`)
+        // Find the Supabase storage key (sb-*-auth-token)
+        const storageKey = Object.keys(localStorage).find(key => key.startsWith('sb-') && key.endsWith('-auth-token'))
+
+        console.log(`[Auth] Updating session for ${session.user.email}. RT: ...${session.refresh_token.slice(-5)} Key: ${storageKey}`)
 
         const currentSessions = getStoredSessions()
         const newSession: SavedSession = {
             email: session.user.email,
             user_id: session.user.id,
             access_token: session.access_token,
-            refresh_token: session.refresh_token
+            refresh_token: session.refresh_token,
+            storageKey: storageKey || undefined
         }
 
         // Upsert session
@@ -101,22 +106,67 @@ export function useUserProfile() {
     const switchAccount = async (email: string) => {
         setLoading(true)
         const targetSession = savedSessions.find(s => s.email === email)
-        if (targetSession) {
-            console.log(`[Auth] Switching to ${email}. RT: ...${targetSession.refresh_token.slice(-5)}`)
 
-            // Use ONLY refresh_token to force Supabase to exchange it for a new session.
+        if (targetSession) {
+            console.log(`[Auth] Switching to ${email}.`)
+
+            // Strategy: Swap LocalStorage and Reload
+            // This is more robust than setSession() because it forces a clean client initialization.
+
+            // 1. Determine key
+            let key = targetSession.storageKey
+            if (!key) {
+                // Try to find existing key suitable for this project
+                // Note: If we are logged out, this might be empty, but usually the project ref is constant.
+                // We fallback to searching or we might be stuck. 
+                // BUT, since we just added storageKey capture, older sessions might not have it.
+                // We'll try to find any existing key first.
+                key = Object.keys(localStorage).find(k => k.startsWith('sb-') && k.endsWith('-auth-token'))
+            }
+
+            if (!key) {
+                console.error("[Auth] Could not determine Supabase storage key for switch.")
+                alert("Could not switch: Config error. Please login again.")
+                setLoading(false)
+                return
+            }
+
+            // 2. Construct session object expected by Supabase
+            // It expects: { access_token, refresh_token, user, ... }
+            // However, we only strictly need access_token and refresh_token to hydrate?
+            // Actually, Supabase client expects the full session object in storage usually.
+            // But we only have partial data (SavedSession has email, id, tokens).
+            // LUCKILY, we can try to use `setSession` one last time if this fails?
+            // NO, let's use the provided tokens. The client basically needs the tokens.
+            // Wait, if we only store partial data, the client might barf on "user" missing.
+
+            // Revert: We DIDN'T save the full session object in SavedSession. We only saved tokens.
+            // So we CAN'T just dump it into LS because the LS format is different (contains full user object).
+            // 
+            // BACKTRACK: We must use `setSession`.
+            // The issue is likely `setSession` failing due to race conditions.
+            //
+            // ALTERNATIVE FIX:
+            // Use `setSession` but handle the failure by clearing storage and asking user to re-login?
+            // OR, maybe pass `refresh_token` AND `access_token` to setSession?
+
+            // Let's try passing BOTH.
             // @ts-ignore
             const { data, error } = await supabase.auth.setSession({
+                access_token: targetSession.access_token,
                 refresh_token: targetSession.refresh_token,
             })
 
             if (error) {
                 console.error("[Auth] Failed to switch session", error)
-                alert(`Failed to switch account: ${error.message}. Please try logging in again.`)
-                // Optional: remove bad session?
-                // removeSession(email)
+                // If "Auth session missing", it usually means Refresh Token is dead.
+                // We should alert user.
+                alert(`Failed to switch to ${email}: Session expired. Please login again.`)
+                // removeSession(email) // Optional
             } else {
                 console.log("[Auth] Switch successful", data)
+                // Force navigation to root to trigger role-based redirect (Admin -> /admin, User -> /app)
+                window.location.href = '/'
             }
         }
         setLoading(false)

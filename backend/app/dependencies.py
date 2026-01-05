@@ -68,25 +68,35 @@ def get_user_context(
     # 3. Inserting 'memberships' (User creates own membership policy)
     
     # Check for existing membership
+    # Parse admin emails safely and case-insensitively
+    admin_emails = []
+    if hasattr(settings, "ADMIN_EMAILS") and settings.ADMIN_EMAILS:
+        admin_emails = [e.strip().lower() for e in settings.ADMIN_EMAILS.split(",") if e.strip()]
+    if hasattr(settings, "ADMIN_EMAIL") and settings.ADMIN_EMAIL: # Handle singular legacy var
+         admin_emails.append(settings.ADMIN_EMAIL.strip().lower())
+
+    # Check for existing membership
     res = client.table("memberships").select("*").eq("user_id", user.id).execute()
-    
-    membership = None
+
+    user_email_lower = user.email.lower()
+    should_be_admin = user_email_lower in admin_emails
+
     if res.data:
         membership = res.data[0]
+        # Auto-Promote: If user is in env vars but not admin in DB, fix it.
+        if should_be_admin:
+            if membership["role"] != "admin":
+                 # Use service client to upgrade role
+                 service_client = get_service_role_client()
+                 service_client.table("memberships").update({"role": "admin"}).eq("user_id", user.id).execute()
+                 membership["role"] = "admin"
     else:
         # Bootstrap: Create Membership
         # Use Service Role client to bypass RLS for creation (users can't insert their own membership by default)
         service_client = get_service_role_client()
 
         # 1. Determine Role
-        role = "user"
-        # Parse admin emails safely
-        admin_emails = []
-        if hasattr(settings, "ADMIN_EMAILS") and settings.ADMIN_EMAILS:
-            admin_emails = [e.strip() for e in settings.ADMIN_EMAILS.split(",") if e.strip()]
-            
-        if user.email in admin_emails or user.email == settings.ADMIN_EMAIL:
-            role = "admin"
+        role = "admin" if should_be_admin else "user"
             
         # 2. Get Default Org (Global Directory)
         # Use service client here too for safety

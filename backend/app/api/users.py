@@ -10,15 +10,7 @@ def get_my_profile(ctx: UserContext = Depends(get_user_context)):
     Returns the current user's profile including Organization and Role.
     Required for Frontend routing (Admin vs User).
     """
-    role = "member"
-    admin_list = []
-    if settings.ADMIN_EMAIL:
-        admin_list.extend([e.strip() for e in settings.ADMIN_EMAIL.split(',')])
-    if settings.ADMIN_EMAILS:
-        admin_list.extend([e.strip() for e in settings.ADMIN_EMAILS.split(',')])
-        
-    if ctx.user.email in admin_list:
-        role = "admin"
+    role = ctx.role
     
     return {
         "id": ctx.user.id,
