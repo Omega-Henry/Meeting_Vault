@@ -115,11 +115,12 @@ export default function ChatList() {
             <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
                 {chats.map((chat) => {
                     const isProcessing = chat.digest_bullets?.summary === 'Processing...';
+                    const basePath = profile?.role === 'admin' ? '/admin/chats' : '/app/chats';
 
                     return (
                         <Link
                             key={chat.id}
-                            to={`/admin/chats/${chat.id}`}
+                            to={`${basePath}/${chat.id}`}
                             className={`group relative flex flex-col justify-between rounded-lg border p-6 transition-colors ${isProcessing ? 'bg-muted/30 cursor-wait' : 'hover:bg-muted/50'
                                 }`}
                             onClick={(e) => isProcessing && e.preventDefault()}
