@@ -10,7 +10,9 @@ import LinksTable from '../pages/LinksTable'
 import GlobalSearch from '../pages/GlobalSearch'
 import RequestsTable from '../pages/admin/RequestsTable'
 import DatabaseEditor from '../pages/admin/DatabaseEditor'
+import AdminFeedback from '../pages/admin/AdminFeedback'
 import Sidebar from '../components/layout/Sidebar'
+import ResizableAside from '../components/layout/ResizableAside'
 
 export default function AdminLayout() {
     const navItems = [
@@ -20,6 +22,7 @@ export default function AdminLayout() {
         { name: 'Services', href: '/admin/services', icon: LayoutDashboard },
         { name: 'Links', href: '/admin/links', icon: LinkIcon },
         { name: 'Database', href: '/admin/database', icon: Database },
+        { name: 'Feedback', href: '/admin/feedback', icon: MessageSquare },
         { name: 'Search', href: '/admin/search', icon: Search },
     ]
 
@@ -41,13 +44,16 @@ export default function AdminLayout() {
                     <Route path="contacts" element={<ContactsTable />} />
                     <Route path="services" element={<ServicesTable />} />
                     <Route path="links" element={<LinksTable />} />
+                    <Route path="feedback" element={<AdminFeedback />} />
                     <Route path="search" element={<GlobalSearch />} />
                 </Routes>
             </div>
 
             {/* Assistant Panel - Hidden on mobile for now */}
-            <div className="hidden lg:block w-96 border-l border-border bg-card">
-                <AssistantPanel />
+            <div className="hidden lg:block h-full">
+                <ResizableAside>
+                    <AssistantPanel />
+                </ResizableAside>
             </div>
         </div>
     )

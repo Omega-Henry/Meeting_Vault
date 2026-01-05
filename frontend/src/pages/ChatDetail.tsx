@@ -3,7 +3,10 @@ import { useParams, useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { ChevronDown, ChevronRight, User, Briefcase, Trash2, Pencil, Check, X } from 'lucide-react'
 
+import { useUserProfile } from '../hooks/useUserContext'
+
 export default function ChatDetail() {
+    const { profile } = useUserProfile()
     const { id } = useParams<{ id: string }>()
     const navigate = useNavigate()
     const [chat, setChat] = useState<any>(null)
@@ -117,25 +120,29 @@ export default function ChatDetail() {
                         ) : (
                             <div className="flex items-center group">
                                 <h1 className="text-3xl font-bold mr-2">{chat.meeting_name}</h1>
-                                <button
-                                    onClick={() => setIsEditingTitle(true)}
-                                    className="opacity-0 group-hover:opacity-100 transition-opacity p-1 hover:bg-muted rounded"
-                                >
-                                    <Pencil className="h-4 w-4 text-muted-foreground" />
-                                </button>
+                                {profile?.role === 'admin' && (
+                                    <button
+                                        onClick={() => setIsEditingTitle(true)}
+                                        className="opacity-0 group-hover:opacity-100 transition-opacity p-1 hover:bg-muted rounded"
+                                    >
+                                        <Pencil className="h-4 w-4 text-muted-foreground" />
+                                    </button>
+                                )}
                             </div>
                         )}
                         <p className="text-muted-foreground mt-2">
                             Uploaded on {new Date(chat.created_at).toLocaleDateString()}
                         </p>
                     </div>
-                    <button
-                        onClick={handleDelete}
-                        className="flex items-center text-destructive hover:bg-destructive/10 px-3 py-2 rounded-md transition-colors"
-                    >
-                        <Trash2 className="h-4 w-4 mr-2" />
-                        Delete Chat
-                    </button>
+                    {profile?.role === 'admin' && (
+                        <button
+                            onClick={handleDelete}
+                            className="flex items-center text-destructive hover:bg-destructive/10 px-3 py-2 rounded-md transition-colors"
+                        >
+                            <Trash2 className="h-4 w-4 mr-2" />
+                            Delete Chat
+                        </button>
+                    )}
                 </div>
             </div>
 
@@ -166,16 +173,20 @@ export default function ChatDetail() {
                 </h3>
                 <div className="grid gap-4 md:grid-cols-2">
                     {services.map((service) => (
-                        <ServiceCard key={service.id} service={service} onUpdate={() => {
-                            // Refresh services
-                            supabase
-                                .from('services')
-                                .select('*, contacts(name, email)')
-                                .eq('meeting_chat_id', id)
-                                .then(({ data }) => {
-                                    if (data) setServices(data)
-                                })
-                        }} />
+                        <ServiceCard
+                            key={service.id}
+                            service={service}
+                            isAdmin={profile?.role === 'admin'}
+                            onUpdate={() => {
+                                // Refresh services
+                                supabase
+                                    .from('services')
+                                    .select('*, contacts(name, email)')
+                                    .eq('meeting_chat_id', id)
+                                    .then(({ data }) => {
+                                        if (data) setServices(data)
+                                    })
+                            }} />
                     ))}
                     {services.length === 0 && (
                         <p className="text-sm text-muted-foreground col-span-full">No services extracted.</p>
@@ -234,7 +245,7 @@ export default function ChatDetail() {
     )
 }
 
-function ServiceCard({ service, onUpdate }: { service: any, onUpdate: () => void }) {
+function ServiceCard({ service, onUpdate, isAdmin }: { service: any, onUpdate: () => void, isAdmin: boolean }) {
     const [isEditing, setIsEditing] = useState(false)
     const [description, setDescription] = useState(service.description)
     const [saving, setSaving] = useState(false)
@@ -267,12 +278,14 @@ function ServiceCard({ service, onUpdate }: { service: any, onUpdate: () => void
                         <User className="h-3 w-3 mr-1" />
                         {service.contacts?.name || 'Unknown'}
                     </span>
-                    <button
-                        onClick={() => setIsEditing(!isEditing)}
-                        className="text-xs text-primary hover:underline"
-                    >
-                        {isEditing ? 'Cancel' : 'Edit'}
-                    </button>
+                    {isAdmin && (
+                        <button
+                            onClick={() => setIsEditing(!isEditing)}
+                            className="text-xs text-primary hover:underline"
+                        >
+                            {isEditing ? 'Cancel' : 'Edit'}
+                        </button>
+                    )}
                 </div>
             </div>
 

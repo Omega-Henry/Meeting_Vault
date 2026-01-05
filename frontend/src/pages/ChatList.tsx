@@ -4,7 +4,10 @@ import { supabase } from '../lib/supabase'
 import { Upload, FileText } from 'lucide-react'
 import { format } from 'date-fns'
 
+import { useUserProfile } from '../hooks/useUserContext'
+
 export default function ChatList() {
+    const { profile } = useUserProfile()
     const [chats, setChats] = useState<any[]>([])
     const [loading, setLoading] = useState(true)
     const [uploading, setUploading] = useState(false)
@@ -88,23 +91,25 @@ export default function ChatList() {
         <div className="space-y-6">
             <div className="flex items-center justify-between">
                 <h2 className="text-2xl font-bold tracking-tight">Meeting Chats</h2>
-                <div className="relative">
-                    <input
-                        type="file"
-                        id="file-upload"
-                        className="hidden"
-                        accept=".txt,.md"
-                        onChange={handleFileSelect}
-                        disabled={uploading}
-                    />
-                    <label
-                        htmlFor="file-upload"
-                        className="cursor-pointer inline-flex items-center justify-center rounded-md text-sm font-medium ring-offset-background transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 bg-primary text-primary-foreground hover:bg-primary/90 h-10 px-4 py-2"
-                    >
-                        <Upload className="mr-2 h-4 w-4" />
-                        {uploading ? 'Uploading...' : 'Upload Chat'}
-                    </label>
-                </div>
+                {profile?.role === 'admin' && (
+                    <div className="relative">
+                        <input
+                            type="file"
+                            id="file-upload"
+                            className="hidden"
+                            accept=".txt,.md"
+                            onChange={handleFileSelect}
+                            disabled={uploading}
+                        />
+                        <label
+                            htmlFor="file-upload"
+                            className="cursor-pointer inline-flex items-center justify-center rounded-md text-sm font-medium ring-offset-background transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 bg-primary text-primary-foreground hover:bg-primary/90 h-10 px-4 py-2"
+                        >
+                            <Upload className="mr-2 h-4 w-4" />
+                            {uploading ? 'Uploading...' : 'Upload Chat'}
+                        </label>
+                    </div>
+                )}
             </div>
 
             <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">

@@ -1,7 +1,7 @@
 from fastapi import APIRouter, UploadFile, File, Depends, HTTPException, status, BackgroundTasks, Form
 from typing import Optional
 from supabase import Client, create_client
-from app.dependencies import get_supabase_client, get_user_context, security, UserContext
+from app.dependencies import get_supabase_client, get_user_context, security, UserContext, require_admin
 from app.services.ingestion import clean_text, compute_hash
 from app.services.hybrid_extraction import extract_meeting_data
 from app.core.config import settings
@@ -119,6 +119,7 @@ async def upload_meeting_chat(
     file: UploadFile = File(...),
     client: Client = Depends(get_supabase_client),
     ctx: UserContext = Depends(get_user_context),
+    admin_ctx: UserContext = Depends(require_admin), # Enforce Admin
     token_payload = Depends(security) # Need raw token for background task
 ):
     # 1. Read file

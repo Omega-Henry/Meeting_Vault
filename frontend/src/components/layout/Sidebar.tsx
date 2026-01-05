@@ -15,9 +15,10 @@ interface SidebarProps {
     title: string
     subtitle: string
     navItems: NavItem[]
+    footerSlot?: React.ReactNode
 }
 
-export default function Sidebar({ title, subtitle, navItems }: SidebarProps) {
+export default function Sidebar({ title, subtitle, navItems, footerSlot }: SidebarProps) {
     const location = useLocation()
     const [isOpen, setIsOpen] = useState(false)
 
@@ -91,7 +92,8 @@ export default function Sidebar({ title, subtitle, navItems }: SidebarProps) {
                     })}
                 </nav>
 
-                <div className="mt-auto border-t border-border pt-4 px-2">
+                <div className="mt-auto border-t border-border pt-4 px-2 space-y-2">
+                    {footerSlot}
                     <AccountSwitcher />
                 </div>
             </div>

@@ -151,20 +151,20 @@ function DescriptionCell({ service }: { service: any }) {
 
     return (
         <div>
-            <div className={clsx("text-sm", !expanded && "line-clamp-2")}>
+            <div className={clsx("text-sm break-words max-w-xl", !expanded && "line-clamp-2")}>
                 {service.links && service.links.length > 0 ? (
                     <a
                         href={service.links[0]}
                         target="_blank"
                         rel="noopener noreferrer"
-                        className="hover:underline text-primary inline-flex items-center group"
+                        className="hover:underline text-primary inline-flex items-center group break-all"
                         onClick={e => e.stopPropagation()}
                     >
                         {service.description}
-                        <ExternalLink className="h-3 w-3 ml-1 opacity-0 group-hover:opacity-100" />
+                        <ExternalLink className="h-3 w-3 ml-1 opacity-0 group-hover:opacity-100 flex-shrink-0" />
                     </a>
                 ) : (
-                    service.description
+                    <span className="whitespace-pre-wrap">{service.description}</span>
                 )}
             </div>
             {isLong && (

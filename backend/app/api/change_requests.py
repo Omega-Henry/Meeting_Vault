@@ -83,9 +83,49 @@ def review_change_request(
     if action == "approve":
         # Apply changes
         target_table = "contacts" if req["target_type"] == "contact" else "services"
+        changes = req["changes"]
+
+        # Special handling for Service updates with "suggested_contact_name"
+        if req["target_type"] == "service" and "suggested_contact_name" in changes:
+            suggested_name = changes.pop("suggested_contact_name")
+            suggested_email = changes.pop("suggested_contact_email", None)
+            
+            # Find or Create Contact
+            # Ideally search by email if provided, else name?
+            # For MVP, let's create a NEW contact if not found strictly?
+            # Or use upload.py logic? Let's keep it simple: Create new if name provided.
+            # But duplicate names? 
+            # Let's search by name (and email) first.
+            
+            contact_query = client.table("contacts").select("id").eq("user_id", user["id"]) # scoping? 
+            # Oh wait, user_id in contacts might be different. 
+            # Admin context: we assume we operate on the same org.
+            # We don't have org_id easily here unless we query user or req context.
+            # Let's just create a new contact for now to be safe, user can merge later.
+            # OR search.
+            
+            # Simplified: Create new contact.
+            new_contact_data = {
+                 "name": suggested_name,
+                 "email": suggested_email,
+                 # "org_id": ...? We need to fetch the target service's org_id or user's.
+            }
+            # We need the org_id. Let's fetch the target service to get its org_id/user_id owner.
+            service_res = client.table("services").select("user_id, org_id").eq("id", req["target_id"]).execute()
+            if service_res.data:
+                svc = service_res.data[0]
+                new_contact_data["user_id"] = svc.get("user_id")
+                new_contact_data["org_id"] = svc.get("org_id")
+            
+            contact_res = client.table("contacts").insert(new_contact_data).execute()
+            if contact_res.data:
+                new_contact_id = contact_res.data[0]["id"]
+                changes["contact_id"] = new_contact_id
+
         # We need to apply 'changes' (jsonb) to the target
         # Careful with security here. We trust the approved JSON.
         
-        apply_res = client.table(target_table).update(req["changes"]).eq("id", req["target_id"]).execute()
+        if changes:
+             apply_res = client.table(target_table).update(changes).eq("id", req["target_id"]).execute()
         
     return {"status": "ok", "request": req}
