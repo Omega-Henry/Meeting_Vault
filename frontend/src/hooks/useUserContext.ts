@@ -21,7 +21,7 @@ interface UserContextType {
     savedSessions: SavedSession[]
     switchAccount: (email: string) => Promise<void>
     addSession: (session: any) => void
-    signOut: () => Promise<void>
+    signOut: (options?: { keepStorage?: boolean }) => Promise<void>
 }
 
 // Global variable to prevent multiple listeners
@@ -103,15 +103,9 @@ export function useUserProfile() {
         setLoading(false)
     }
 
-    const signOut = async () => {
-        // Just sign out current. Keep others in storage? 
-        // User asked for "switch options instead of logging out". 
-        // But explicit sign out should probably clear current session from storage 
-        // OR allow "Forget Account" separately.
-        // For now, standard signOut clears current supabase session.
-        // We will keep it in storage unless explicitly removed (which we can add later if requested)
-        // actually, let's remove CURRENT user from storage on explicit sign out
-        if (profile?.email) {
+    const signOut = async (options?: { keepStorage?: boolean }) => {
+        // Only remove from storage if keepStorage is NOT true
+        if (!options?.keepStorage && profile?.email) {
             const currentSessions = getStoredSessions()
             const filtered = currentSessions.filter(s => s.email !== profile.email)
             localStorage.setItem(SESSIONS_KEY, JSON.stringify(filtered))
