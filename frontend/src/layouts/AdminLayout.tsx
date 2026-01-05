@@ -1,10 +1,7 @@
 import { } from 'react'
-import { Routes, Route, Link, useLocation } from 'react-router-dom'
+import { Routes, Route } from 'react-router-dom'
 import { LayoutDashboard, MessageSquare, Users, Link as LinkIcon, Search, CheckSquare, Database } from 'lucide-react'
-import clsx from 'clsx'
 import AssistantPanel from '../components/AssistantPanel'
-import { ThemeToggle } from '../components/ThemeToggle'
-import AccountSwitcher from '../components/AccountSwitcher'
 import ChatList from '../pages/ChatList'
 import ChatDetail from '../pages/ChatDetail'
 import ContactsTable from '../pages/ContactsTable'
@@ -13,10 +10,9 @@ import LinksTable from '../pages/LinksTable'
 import GlobalSearch from '../pages/GlobalSearch'
 import RequestsTable from '../pages/admin/RequestsTable'
 import DatabaseEditor from '../pages/admin/DatabaseEditor'
+import Sidebar from '../components/layout/Sidebar'
 
 export default function AdminLayout() {
-    const location = useLocation()
-
     const navItems = [
         { name: 'Chats', href: '/admin', icon: MessageSquare },
         { name: 'Requests', href: '/admin/requests', icon: CheckSquare },
@@ -28,46 +24,15 @@ export default function AdminLayout() {
     ]
 
     return (
-        <div className="flex h-screen bg-background text-foreground">
-            {/* Sidebar */}
-            <div className="w-64 border-r border-border bg-card p-4 flex flex-col">
-                <div className="mb-8 flex items-center justify-between px-2">
-                    <div>
-                        <h1 className="text-xl font-bold">MeetingVault</h1>
-                        <span className="text-xs text-muted-foreground uppercase tracking-wider">ADMIN PORTAL</span>
-                    </div>
-                    <ThemeToggle />
-                </div>
-
-                <nav className="space-y-1 flex-1">
-                    {navItems.map((item) => {
-                        const Icon = item.icon
-                        const isActive = location.pathname === item.href || (item.href !== '/admin' && location.pathname.startsWith(item.href))
-                        return (
-                            <Link
-                                key={item.name}
-                                to={item.href}
-                                className={clsx(
-                                    'flex items-center rounded-md px-2 py-2 text-sm font-medium transition-colors',
-                                    isActive
-                                        ? 'bg-primary text-primary-foreground'
-                                        : 'text-muted-foreground hover:bg-muted hover:text-foreground'
-                                )}
-                            >
-                                <Icon className="mr-3 h-5 w-5" />
-                                {item.name}
-                            </Link>
-                        )
-                    })}
-                </nav>
-
-                <div className="mt-auto border-t border-border pt-4 px-2">
-                    <AccountSwitcher />
-                </div>
-            </div>
+        <div className="flex flex-col lg:flex-row h-screen bg-background text-foreground">
+            <Sidebar
+                title="MeetingVault"
+                subtitle="ADMIN PORTAL"
+                navItems={navItems}
+            />
 
             {/* Main Content */}
-            <div className="flex-1 overflow-auto p-8">
+            <div className="flex-1 overflow-auto p-4 lg:p-8">
                 <Routes>
                     <Route path="/" element={<ChatList />} />
                     <Route path="chats/:id" element={<ChatDetail />} />
@@ -80,8 +45,8 @@ export default function AdminLayout() {
                 </Routes>
             </div>
 
-            {/* Assistant Panel */}
-            <div className="w-96 border-l border-border bg-card">
+            {/* Assistant Panel - Hidden on mobile for now */}
+            <div className="hidden lg:block w-96 border-l border-border bg-card">
                 <AssistantPanel />
             </div>
         </div>

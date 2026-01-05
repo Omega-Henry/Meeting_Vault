@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from 'react'
 import { supabase } from '../lib/supabase'
-import { Send, Bot, Loader2 } from 'lucide-react'
+import { Send, Bot, Loader2, ExternalLink } from 'lucide-react'
 import clsx from 'clsx'
 
 interface Message {
@@ -140,14 +140,21 @@ export default function AssistantPanel() {
                                             <p className="text-xs font-semibold opacity-70">Found {msg.data.count} services:</p>
                                             <div className="max-h-60 overflow-y-auto space-y-2">
                                                 {msg.data.data.map((service: any) => (
-                                                    <div key={service.id} className="text-xs bg-background/50 p-2 rounded border-l-2 border-primary">
+                                                    <div key={service.id} className="text-xs bg-background/50 p-2 rounded border-l-2 border-primary group hover:bg-muted transition-colors">
                                                         <div className="flex justify-between">
                                                             <span className={clsx("uppercase text-[10px] px-1 rounded", service.type === 'offer' ? "bg-green-500/10 text-green-500" : "bg-blue-500/10 text-blue-500")}>
                                                                 {service.type}
                                                             </span>
                                                             <span className="text-[10px] opacity-50">{service.contacts?.name}</span>
                                                         </div>
-                                                        <div className="mt-1">{service.description}</div>
+                                                        {service.links && service.links.length > 0 ? (
+                                                            <a href={service.links[0]} target="_blank" rel="noopener noreferrer" className="mt-1 block hover:underline text-primary flex items-center justify-between">
+                                                                {service.description}
+                                                                <ExternalLink className="h-3 w-3 opacity-0 group-hover:opacity-100" />
+                                                            </a>
+                                                        ) : (
+                                                            <div className="mt-1">{service.description}</div>
+                                                        )}
                                                     </div>
                                                 ))}
                                             </div>

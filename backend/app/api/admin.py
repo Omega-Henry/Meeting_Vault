@@ -111,7 +111,7 @@ def scan_duplicates(
 
     return suggestions
 
-@router.post("/merge-contacts", response_model=dict)
+@router.post("/contacts/merge", response_model=dict)
 def merge_contacts(
     request: MergeRequest,
     ctx: UserContext = Depends(require_admin),
@@ -179,16 +179,19 @@ def merge_contacts(
     # 5. Archive Duplicates (Soft Delete)
     client.table("contacts").update({"is_archived": True}).in_("id", dup_ids).execute()
 
-    # 6. Create Audit Log
-    audit_entry = {
-       "org_id": ctx.org_id,
-       "user_id": ctx.user.id,
-       "primary_contact_id": primary_id,
-       "merged_contact_ids": dup_ids,
-       "timestamp": datetime.datetime.now().isoformat(),
-       "details": {"reason": "Admin Manual Merge", "updates": updates}
-    }
-    client.table("merge_audit_log").insert(audit_entry).execute()
+    # 6. Create Audit Log (Safeguarded)
+    try:
+        audit_entry = {
+           "org_id": ctx.org_id,
+           "user_id": ctx.user.id,
+           "primary_contact_id": primary_id,
+           "merged_contact_ids": dup_ids,
+           "timestamp": datetime.datetime.now().isoformat(),
+           "details": {"reason": "Admin Manual Merge", "updates": updates}
+        }
+        client.table("merge_audit_log").insert(audit_entry).execute()
+    except Exception as e:
+        logger.warning(f"Failed to write merge audit log: {e}")
     
     return {"status": "success", "message": f"Merged {len(dup_ids)} contacts into {primary_id}"}
 

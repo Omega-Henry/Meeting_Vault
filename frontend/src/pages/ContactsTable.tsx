@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { supabase } from '../lib/supabase'
-import { Search, Pencil, Check, X, Trash2, ExternalLink } from 'lucide-react'
+import { Search, Pencil, Check, X, Trash2, ExternalLink, GitMerge } from 'lucide-react'
+import MergeContactModal from '../components/MergeContactModal'
 import { Link, useSearchParams } from 'react-router-dom'
 
 export default function ContactsTable() {
@@ -215,6 +216,8 @@ function ContactRow({ contact, selected, onSelect, onUpdate }: { contact: any, s
         )
     }
 
+    const [mergeTarget, setMergeTarget] = useState<any>(null)
+
     return (
         <tr className="hover:bg-muted/50 group">
             <td className="px-4 py-3">
@@ -242,14 +245,32 @@ function ContactRow({ contact, selected, onSelect, onUpdate }: { contact: any, s
                     ))}
                 </div>
             </td>
-            <td className="px-4 py-3">
+            <td className="px-4 py-3 flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
                 <button
                     onClick={() => setIsEditing(true)}
-                    className="opacity-0 group-hover:opacity-100 p-1 hover:bg-muted rounded transition-opacity"
+                    className="p-1 hover:bg-muted rounded text-muted-foreground hover:text-foreground"
+                    title="Edit Contact"
                 >
-                    <Pencil className="h-4 w-4 text-muted-foreground" />
+                    <Pencil className="h-4 w-4" />
+                </button>
+                <button
+                    onClick={() => setMergeTarget(contact)}
+                    className="p-1 hover:bg-muted rounded text-muted-foreground hover:text-foreground"
+                    title="Merge Contact"
+                >
+                    <GitMerge className="h-4 w-4" />
                 </button>
             </td>
+            {mergeTarget && (
+                <MergeContactModal
+                    isOpen={!!mergeTarget}
+                    onClose={() => setMergeTarget(null)}
+                    sourceContact={mergeTarget}
+                    onMergeComplete={onUpdate}
+                />
+            )}
         </tr>
     )
 }
+
+

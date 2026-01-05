@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { supabase } from '../lib/supabase'
 import { Link, useSearchParams } from 'react-router-dom'
-import { X } from 'lucide-react'
+import { X, ExternalLink } from 'lucide-react'
 
 export default function ServicesTable() {
     const [services, setServices] = useState<any[]>([])
@@ -87,7 +87,14 @@ export default function ServicesTable() {
                                         </span>
                                     </td>
                                     <td className="px-4 py-3 max-w-md truncate" title={service.description}>
-                                        {service.description}
+                                        {service.links && service.links.length > 0 ? (
+                                            <a href={service.links[0]} target="_blank" rel="noopener noreferrer" className="hover:underline text-primary flex items-center group">
+                                                {service.description}
+                                                <ExternalLink className="h-3 w-3 ml-1 opacity-0 group-hover:opacity-100" />
+                                            </a>
+                                        ) : (
+                                            service.description
+                                        )}
                                     </td>
                                     <td className="px-4 py-3">
                                         {service.contacts ? (
