@@ -12,9 +12,12 @@ import ServicesTable from '../pages/ServicesTable'
 import LinksTable from '../pages/LinksTable'
 import GlobalSearch from '../pages/GlobalSearch'
 import RequestsTable from '../pages/admin/RequestsTable'
+import { useUserProfile } from '../hooks/useUserContext'
 
 export default function AdminLayout() {
     const location = useLocation()
+
+    const { profile } = useUserProfile()
 
     const navItems = [
         { name: 'Chats', href: '/admin', icon: MessageSquare },
@@ -29,12 +32,12 @@ export default function AdminLayout() {
         <div className="flex h-screen bg-background text-foreground">
             {/* Sidebar */}
             <div className="w-64 border-r border-border bg-card p-4 flex flex-col">
-                <div className="mb-8 px-2">
-                    <div className="flex items-center justify-between">
+                <div className="mb-8 flex items-center justify-between px-2">
+                    <div>
                         <h1 className="text-xl font-bold">MeetingVault</h1>
-                        <ThemeToggle />
+                        <span className="text-xs text-muted-foreground uppercase tracking-wider">ADMIN PORTAL</span>
                     </div>
-                    <p className="text-xs text-muted-foreground font-medium mt-1">ADMIN PORTAL</p>
+                    <ThemeToggle />
                 </div>
 
                 <nav className="space-y-1 flex-1">
@@ -60,6 +63,9 @@ export default function AdminLayout() {
                 </nav>
 
                 <div className="mt-auto border-t border-border pt-4">
+                    <div className="px-2 py-2 mb-2 text-xs text-muted-foreground break-words">
+                        {profile?.email}
+                    </div>
                     <button
                         onClick={() => supabase.auth.signOut()}
                         className="flex w-full items-center rounded-md px-2 py-2 text-sm font-medium text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
