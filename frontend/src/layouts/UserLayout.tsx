@@ -1,17 +1,15 @@
 import { } from 'react'
 import { Routes, Route, Link, useLocation } from 'react-router-dom'
-import { LayoutDashboard, Users, LogOut, CheckSquare } from 'lucide-react'
-import { supabase } from '../lib/supabase'
+import { LayoutDashboard, Users, CheckSquare } from 'lucide-react'
 import clsx from 'clsx'
 import AssistantPanel from '../components/AssistantPanel'
 import { ThemeToggle } from '../components/ThemeToggle'
+import AccountSwitcher from '../components/AccountSwitcher'
 import UserContacts from '../pages/user/UserContacts'
 import UserServices from '../pages/user/UserServices'
-import { useUserProfile } from '../hooks/useUserContext'
 
 export default function UserLayout() {
     const location = useLocation()
-    const { profile } = useUserProfile()
 
     const navItems = [
         { name: 'Offers', href: '/app/offers', icon: LayoutDashboard },
@@ -53,17 +51,8 @@ export default function UserLayout() {
                     })}
                 </nav>
 
-                <div className="mt-auto border-t border-border pt-4">
-                    <div className="px-2 py-2 mb-2 text-xs text-muted-foreground break-words">
-                        {profile?.email}
-                    </div>
-                    <button
-                        onClick={() => supabase.auth.signOut()}
-                        className="flex w-full items-center rounded-md px-2 py-2 text-sm font-medium text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
-                    >
-                        <LogOut className="mr-3 h-5 w-5" />
-                        Sign Out
-                    </button>
+                <div className="mt-auto border-t border-border pt-4 px-2">
+                    <AccountSwitcher />
                 </div>
             </div>
 
