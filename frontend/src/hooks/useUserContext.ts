@@ -21,7 +21,8 @@ interface UserContextType {
     savedSessions: SavedSession[]
     switchAccount: (email: string) => Promise<void>
     addSession: (session: any) => void
-    signOut: (options?: { keepStorage?: boolean }) => Promise<void>
+    signOut: (options?: { keepStorage?: boolean, scope?: 'global' | 'local' | 'others' }) => Promise<void>
+    removeSession: (email: string) => void
 }
 
 // Global variable to prevent multiple listeners
@@ -34,6 +35,7 @@ export const UserContext = createContext<UserContextType>({
     switchAccount: async () => { },
     addSession: () => { },
     signOut: async () => { },
+    removeSession: () => { },
 })
 
 // Helper to get sessions from storage
@@ -59,6 +61,14 @@ export function useUserProfile() {
     const updateSavedSession = useCallback((session: any) => {
         if (!session?.user?.email) return
 
+        // Validation: Ensure we have a refresh token. 
+        if (!session.refresh_token) {
+            console.warn("Session missing refresh_token! Not saving to storage.", session)
+            return
+        }
+
+        console.log(`[Auth] Updating session for ${session.user.email}. RT: ...${session.refresh_token.slice(-5)}`)
+
         const currentSessions = getStoredSessions()
         const newSession: SavedSession = {
             email: session.user.email,
@@ -81,29 +91,42 @@ export function useUserProfile() {
         setSavedSessions(updatedSessions)
     }, [])
 
+    const removeSession = (email: string) => {
+        const currentSessions = getStoredSessions()
+        const filtered = currentSessions.filter(s => s.email !== email)
+        localStorage.setItem(SESSIONS_KEY, JSON.stringify(filtered))
+        setSavedSessions(filtered)
+    }
+
     const switchAccount = async (email: string) => {
         setLoading(true)
         const targetSession = savedSessions.find(s => s.email === email)
         if (targetSession) {
-            const { error } = await supabase.auth.setSession({
-                access_token: targetSession.access_token,
+            console.log(`[Auth] Switching to ${email}. RT: ...${targetSession.refresh_token.slice(-5)}`)
+
+            // Use ONLY refresh_token to force Supabase to exchange it for a new session.
+            // @ts-ignore
+            const { data, error } = await supabase.auth.setSession({
                 refresh_token: targetSession.refresh_token,
             })
+
             if (error) {
-                console.error("Failed to switch session", error)
-                // Remove invalid session
-                const filtered = savedSessions.filter(s => s.email !== email)
-                localStorage.setItem(SESSIONS_KEY, JSON.stringify(filtered))
-                setSavedSessions(filtered)
-                if (savedSessions.length === 0) {
-                    await supabase.auth.signOut()
-                }
+                console.error("[Auth] Failed to switch session", error)
+                alert(`Failed to switch account: ${error.message}. Please try logging in again.`)
+                // Optional: remove bad session?
+                // removeSession(email)
+            } else {
+                console.log("[Auth] Switch successful", data)
             }
         }
         setLoading(false)
     }
 
-    const signOut = async (options?: { keepStorage?: boolean }) => {
+
+
+    // ... (skipping to signOut implementation)
+
+    const signOut = async (options?: { keepStorage?: boolean, scope?: 'global' | 'local' | 'others' }) => {
         // Only remove from storage if keepStorage is NOT true
         if (!options?.keepStorage && profile?.email) {
             const currentSessions = getStoredSessions()
@@ -111,8 +134,59 @@ export function useUserProfile() {
             localStorage.setItem(SESSIONS_KEY, JSON.stringify(filtered))
             setSavedSessions(filtered)
         }
-        await supabase.auth.signOut()
+        await supabase.auth.signOut({ scope: options?.scope })
     }
+
+    useEffect(() => {
+        const handleStorageChange = async (e: StorageEvent) => {
+            if (e.key === SESSIONS_KEY) {
+                console.log("Storage update detected:", e.newValue)
+                const newSessions: SavedSession[] = e.newValue ? JSON.parse(e.newValue) : []
+                const oldSessions: SavedSession[] = e.oldValue ? JSON.parse(e.oldValue) : []
+
+                setSavedSessions(newSessions)
+
+                console.log("Checking auto-sync. Profile:", profile, "NewSessions:", newSessions.length)
+
+                // Auto-login logic:
+                // If we are currently logged out (!profile) and a session appears/updates (from another tab),
+                // we should try to sign in with it.
+                if (!profile && newSessions.length > 0) {
+                    // Find the session that CHANGED (added or updated)
+                    // We look for a session in newSessions that isn't in oldSessions 
+                    // OR is in oldSessions but has different tokens.
+                    const changedSession = newSessions.find(ns => {
+                        const oldMatch = oldSessions.find(os => os.email === ns.email)
+                        if (!oldMatch) return true // It's new
+                        return oldMatch.access_token !== ns.access_token // It updated
+                    })
+
+                    // Fallback to last session if we can't determine (e.g. slight timing issue)
+                    const targetSession = changedSession || newSessions[newSessions.length - 1]
+
+                    if (targetSession) {
+                        try {
+                            console.log("Attempting auto-sync with:", targetSession.email)
+                            // @ts-ignore
+                            const { error } = await supabase.auth.setSession({
+                                refresh_token: targetSession.refresh_token,
+                            })
+                            if (!error) {
+                                console.log("Auto-sync success!")
+                            } else {
+                                console.error("Auto-sync error:", error)
+                            }
+                        } catch (err) {
+                            console.error("Auto-sync session failed", err)
+                        }
+                    }
+                }
+            }
+        }
+
+        window.addEventListener('storage', handleStorageChange)
+        return () => window.removeEventListener('storage', handleStorageChange)
+    }, [profile]) // Re-bind if profile changes so we know if we are logged out
 
     useEffect(() => {
         let mounted = true
@@ -174,6 +248,7 @@ export function useUserProfile() {
         savedSessions,
         switchAccount,
         addSession: updateSavedSession,
-        signOut
+        signOut,
+        removeSession
     }
 }
