@@ -55,7 +55,7 @@ def list_pending_requests(
     """
     Admin: List all pending requests for the organization.
     """
-    res = client.table("change_requests").select("*, created_by_user:created_by(email)").eq("org_id", ctx.org_id).eq("status", "pending").order("created_at", desc=True).execute()
+    res = client.table("change_requests").select("*").eq("org_id", ctx.org_id).eq("status", "pending").order("created_at", desc=True).execute()
     return res.data
 
 @router.post("/admin/{request_id}/{action}", response_model=dict)

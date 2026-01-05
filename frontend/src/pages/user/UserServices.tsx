@@ -1,5 +1,6 @@
 
 import { useEffect, useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import { supabase } from '../../lib/supabase'
 import { Search } from 'lucide-react'
 import ChangeRequestModal from '../../components/ChangeRequestModal'
@@ -11,7 +12,8 @@ interface UserServicesProps {
 export default function UserServices({ type }: UserServicesProps) {
     const [services, setServices] = useState<any[]>([])
     const [loading, setLoading] = useState(true)
-    const [search, setSearch] = useState('')
+    const [searchParams] = useSearchParams()
+    const [search, setSearch] = useState(searchParams.get('q') || searchParams.get('search') || '')
 
     // Modal
     const [modalOpen, setModalOpen] = useState(false)

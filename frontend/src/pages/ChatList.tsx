@@ -87,26 +87,43 @@ export default function ChatList() {
             </div>
 
             <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-                {chats.map((chat) => (
-                    <Link
-                        key={chat.id}
-                        to={`/admin/chats/${chat.id}`}
-                        className="group relative flex flex-col justify-between rounded-lg border p-6 hover:bg-muted/50 transition-colors"
-                    >
-                        <div className="space-y-2">
-                            <div className="flex items-center justify-between">
-                                <FileText className="h-8 w-8 text-muted-foreground group-hover:text-primary transition-colors" />
-                                <span className="text-xs text-muted-foreground">
-                                    {format(new Date(chat.created_at), 'MMM d, yyyy')}
-                                </span>
+                {chats.map((chat) => {
+                    const isProcessing = chat.digest_bullets?.summary === 'Processing...';
+
+                    return (
+                        <Link
+                            key={chat.id}
+                            to={`/admin/chats/${chat.id}`}
+                            className={`group relative flex flex-col justify-between rounded-lg border p-6 transition-colors ${isProcessing ? 'bg-muted/30 cursor-wait' : 'hover:bg-muted/50'
+                                }`}
+                            onClick={(e) => isProcessing && e.preventDefault()} // Prevent click if processing? Maybe user wants to see raw text? Let's allow click but show status.
+                        >
+                            <div className="space-y-2">
+                                <div className="flex items-center justify-between">
+                                    <FileText className={`h-8 w-8 transition-colors ${isProcessing ? 'text-muted-foreground animate-pulse' : 'text-muted-foreground group-hover:text-primary'}`} />
+                                    <span className="text-xs text-muted-foreground">
+                                        {format(new Date(chat.created_at), 'MMM d, yyyy')}
+                                    </span>
+                                </div>
+                                <h3 className="font-semibold tracking-tight">{chat.meeting_name}</h3>
+
+                                {isProcessing ? (
+                                    <div className="flex items-center gap-2 text-sm text-amber-600 font-medium">
+                                        <span className="relative flex h-2 w-2">
+                                            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75"></span>
+                                            <span className="relative inline-flex rounded-full h-2 w-2 bg-amber-500"></span>
+                                        </span>
+                                        Processing Extraction...
+                                    </div>
+                                ) : (
+                                    <p className="text-sm text-muted-foreground line-clamp-2">
+                                        {chat.cleaned_text.substring(0, 100)}...
+                                    </p>
+                                )}
                             </div>
-                            <h3 className="font-semibold tracking-tight">{chat.meeting_name}</h3>
-                            <p className="text-sm text-muted-foreground line-clamp-2">
-                                {chat.cleaned_text.substring(0, 100)}...
-                            </p>
-                        </div>
-                    </Link>
-                ))}
+                        </Link>
+                    )
+                })}
 
                 {chats.length === 0 && (
                     <div className="col-span-full text-center py-12 text-muted-foreground border-2 border-dashed rounded-lg">
