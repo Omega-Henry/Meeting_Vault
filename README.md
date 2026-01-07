@@ -126,3 +126,4 @@ Visit your Frontend URL. It should load and be able to communicate with the Back
 - [x] SQL Migrations (`schema.sql`)
 - [x] Dockerfiles
 - [x] LangGraph Agent
+- [x] [App Architecture & Rebuild Guide](./APP_ARCHITECTURE_AND_REBUILD_GUIDE.md)
