@@ -31,7 +31,7 @@ export default function AssistantPanel() {
         setMessages(initial)
         localStorage.removeItem('ai_chat_history')
     }
-    const scrollRef = useRef<HTMLDivElement>(null)
+
 
     // Edit Modal State
     const [editTarget, setEditTarget] = useState<any>(null)
