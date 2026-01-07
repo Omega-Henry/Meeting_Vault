@@ -1,6 +1,52 @@
 # MeetingVault
 
-MeetingVault is a production-ready web app for storing and analyzing meeting chats. It features secure multi-tenancy, deterministic data extraction, and an AI assistant powered by LangGraph.
+State-of-the-art contact directory and deal flow engine powered by AI.
+
+## 🚀 Features
+
+- **Global Directory**: Searchable contact database with rich profiles.
+- **AI Zoom Ingestion**: Automatically extracts contacts, offers, and requests from Zoom chat logs.
+- **My Profile**: Claim your profile, verify your info, and manage your own offers/requests.
+- **Admin Tools**:
+    - **Requests Queue**: Approve claims and profile changes.
+    - **Audit Logs**: Full traceability of system actions.
+    - **Data Review**: AI extraction quality control queue.
+    - **Database Editor**: Merge contacts and manage data integrity.
+- **AI Assistant**: Natural language search ("Find me lenders in Dallas") and service lookup.
+
+## 🛠️ Stack
+
+- **Frontend**: React (Vite), TailwindCSS, Lucide Icons
+- **Backend**: FastAPI, Supabase (Postgres + Auth), LangGraph (AI Agent)
+- **AI**: OpenAI / OpenRouter (LLM)
+
+## 📦 Deployment & Setup
+
+### Database (Supabase)
+Run `migrations/*.sql` in order. Ensure `contact_profiles` and RLS policies are applied.
+
+### Backend
+```bash
+cd backend
+python -m venv venv
+source venv/bin/activate
+pip install -r requirements.txt
+uvicorn app.main:app --reload
+```
+
+### Frontend
+```bash
+cd frontend
+npm install
+npm run dev
+```
+
+## ✅ Verification
+Run backend smoke tests:
+```bash
+cd backend
+PYTHONPATH=. pytest tests/
+```
 
 ## Architecture
 
@@ -8,7 +54,6 @@ MeetingVault is a production-ready web app for storing and analyzing meeting cha
 - **Backend**: Python FastAPI
 - **Database**: Supabase (Postgres)
 - **AI Orchestration**: LangGraph + LangChain
-- **Hosting**: Google Cloud Run (2 services)
 
 ### Multi-Tenancy & Shared Directory (RLS)
 
