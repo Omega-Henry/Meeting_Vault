@@ -114,3 +114,93 @@ def get_my_claims(
     """
     res = client.table("claim_requests").select("*, contact:contacts(name)").eq("user_id", user.id).execute()
     return res.data
+
+
+# ========== ADMIN ENDPOINTS ==========
+
+class ClaimDecision(BaseModel):
+    decision: str  # 'approve' or 'reject'
+    reason: Optional[str] = None
+
+@router.post("/{claim_id}/decide", response_model=Dict[str, Any])
+def decide_claim(
+    claim_id: str,
+    payload: ClaimDecision,
+    user = Depends(get_current_user),
+    client: Client = Depends(get_supabase_client)
+):
+    """
+    Admin approves or rejects a claim request.
+    If approved, sets claimed_by_user_id on the contact.
+    """
+    # Check admin role
+    membership = client.table("memberships").select("role").eq("user_id", user.id).execute()
+    if not membership.data or membership.data[0].get("role") != "admin":
+        raise HTTPException(status_code=403, detail="Admin access required")
+    
+    # Get claim
+    claim_res = client.table("claim_requests").select("*").eq("id", claim_id).execute()
+    if not claim_res.data:
+        raise HTTPException(status_code=404, detail="Claim not found")
+    
+    claim = claim_res.data[0]
+    
+    if claim["status"] != "pending":
+        raise HTTPException(status_code=400, detail="Claim already processed")
+    
+    new_status = "approved" if payload.decision == "approve" else "rejected"
+    
+    # Update claim status
+    client.table("claim_requests").update({
+        "status": new_status,
+        "reviewed_by": user.id,
+        "reviewed_at": "now()",
+        "decision_reason": payload.reason
+    }).eq("id", claim_id).execute()
+    
+    # If approved, set claimed_by_user_id on contact
+    if new_status == "approved":
+        client.table("contacts").update({
+            "claimed_by_user_id": claim["user_id"]
+        }).eq("id", claim["contact_id"]).execute()
+        
+        # Also ensure a contact_profile exists for this contact
+        profile_exists = client.table("contact_profiles").select("contact_id").eq("contact_id", claim["contact_id"]).execute()
+        if not profile_exists.data:
+            client.table("contact_profiles").insert({
+                "contact_id": claim["contact_id"],
+                "field_provenance": {}
+            }).execute()
+    
+    # Audit log
+    client.table("audit_log").insert({
+        "actor_id": user.id,
+        "action": f"claim_{new_status}",
+        "target_type": "claim_request",
+        "target_id": claim_id,
+        "diff": {"claim_id": claim_id, "contact_id": claim["contact_id"], "reason": payload.reason}
+    }).execute()
+    
+    return {"status": "success", "decision": new_status}
+
+
+@router.get("/pending", response_model=List[Dict[str, Any]])
+def get_pending_claims(
+    user = Depends(get_current_user),
+    client: Client = Depends(get_supabase_client)
+):
+    """
+    Admin endpoint to list all pending claim requests.
+    """
+    # Check admin role
+    membership = client.table("memberships").select("role").eq("user_id", user.id).execute()
+    if not membership.data or membership.data[0].get("role") != "admin":
+        raise HTTPException(status_code=403, detail="Admin access required")
+    
+    res = client.table("claim_requests")\
+        .select("*, contact:contacts(id, name, email, phone), user:auth.users(email)")\
+        .eq("status", "pending")\
+        .order("created_at", desc=True)\
+        .execute()
+    
+    return res.data

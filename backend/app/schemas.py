@@ -12,7 +12,24 @@ class ContactProfileBase(BaseModel):
     avatar_url: Optional[str] = None
     assets: List[str] = []
     buy_box: Dict[str, Any] = {}
-    field_provenance: Dict[str, str] = {} # e.g. {"bio": "user_verified"}
+    field_provenance: Dict[str, str] = {} # e.g. {"bio": "user_verified", "phone": "ai_generated"}
+    
+    # New rich profile fields
+    cell_phone: Optional[str] = None
+    office_phone: Optional[str] = None
+    blinq: Optional[str] = None
+    website: Optional[str] = None
+    communities: List[str] = []
+    markets: List[str] = []  # e.g. ["MO", "TX", "Nationwide"]
+    min_target_price: Optional[float] = None
+    max_target_price: Optional[float] = None
+    limits: Dict[str, Any] = {}  # Interest rate, ownership %, etc.
+    i_can_help_with: Optional[str] = None
+    help_me_with: Optional[str] = None
+    hot_plate: Optional[str] = None  # Currently working on
+    message_to_world: Optional[str] = None
+    role_tags: List[str] = []  # e.g. ["tc", "gator", "subto"]
+    completeness_score: int = 0
 
 class ContactBase(BaseModel):
     name: Optional[str] = None

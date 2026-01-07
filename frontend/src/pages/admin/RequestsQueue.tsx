@@ -19,10 +19,15 @@ export default function RequestsQueue() {
         const { data: { session } } = await supabase.auth.getSession()
         if (!session) return
 
-        const endpoint = activeTab === 'claims' ? 'claims' : 'changes'
-        const url = `${import.meta.env.VITE_API_BASE_URL || ''}/api/admin/requests/${endpoint}?status=pending`
-
         try {
+            let url: string
+            if (activeTab === 'claims') {
+                // Use the new claims pending endpoint
+                url = `${import.meta.env.VITE_API_BASE_URL || ''}/api/claims/pending`
+            } else {
+                url = `${import.meta.env.VITE_API_BASE_URL || ''}/api/admin/requests/changes?status=pending`
+            }
+
             const res = await fetch(url, {
                 headers: { 'Authorization': `Bearer ${session.access_token}` }
             })
@@ -42,27 +47,41 @@ export default function RequestsQueue() {
         const { data: { session } } = await supabase.auth.getSession()
         if (!session) return
 
-        const endpoint = activeTab === 'claims' ? 'claims' : 'changes'
-        const url = `${import.meta.env.VITE_API_BASE_URL || ''}/api/admin/requests/${endpoint}/${id}/action`
-
         try {
+            let url: string
+            let body: any
+
+            if (activeTab === 'claims') {
+                // Use the new claims decide endpoint
+                url = `${import.meta.env.VITE_API_BASE_URL || ''}/api/claims/${id}/decide`
+                body = {
+                    decision: action,
+                    reason: action === 'reject' ? 'Admin rejected via Queue' : 'Admin approved'
+                }
+            } else {
+                // Use existing change request endpoint
+                url = `${import.meta.env.VITE_API_BASE_URL || ''}/api/admin/requests/changes/${id}/action`
+                body = {
+                    action,
+                    reason: action === 'reject' ? 'Admin rejected via Queue' : 'Admin approved'
+                }
+            }
+
             const res = await fetch(url, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
                     'Authorization': `Bearer ${session.access_token}`
                 },
-                body: JSON.stringify({
-                    action,
-                    reason: action === 'reject' ? 'Admin rejected via Queue' : 'Admin approved'
-                })
+                body: JSON.stringify(body)
             })
 
             if (res.ok) {
                 // Remove from list
                 setRequests(prev => prev.filter(r => r.id !== id))
             } else {
-                alert("Failed to process request")
+                const err = await res.json()
+                alert(err.detail || "Failed to process request")
             }
         } catch (error) {
             console.error(error)
