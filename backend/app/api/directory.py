@@ -17,7 +17,8 @@ def list_contacts(
     """
     List contacts in the user's organization.
     """
-    query = client.table("contacts").select("*, services(id, type, description, is_archived), profile:contact_profiles(*)").eq("org_id", ctx.org_id)
+    # Removed strict org_id filter to allow Global access
+    query = client.table("contacts").select("*, services(id, type, description, is_archived), profile:contact_profiles(*)")
     
     if q:
         # Simple ILIKE search on name or email
@@ -40,7 +41,8 @@ def list_services(
     List services (offers/requests) in the user's organization.
     Includes contact details.
     """
-    query = client.table("services").select("*, contacts(name, email, phone)").eq("org_id", ctx.org_id)
+    # Removed strict org_id filter
+    query = client.table("services").select("*, contacts(name, email, phone)")
     
     if type:
         query = query.eq("type", type)
