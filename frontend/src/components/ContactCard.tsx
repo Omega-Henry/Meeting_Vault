@@ -1,4 +1,4 @@
-import { Phone, Mail } from "lucide-react"
+import { Phone, Mail, Building, Target } from "lucide-react"
 
 interface ContactCardProps {
     contact: any
@@ -8,6 +8,11 @@ interface ContactCardProps {
 export function ContactCard({ contact, onClick }: ContactCardProps) {
     const profile = contact.profile || {}
     const initials = contact.name ? contact.name.split(' ').map((n: string) => n[0]).join('').substring(0, 2).toUpperCase() : '??'
+
+    // Parse assets and buy_box
+    const assets = Array.isArray(profile.assets) ? profile.assets : []
+    const buyBox = profile.buy_box || {}
+    const buyBoxSummary = Object.entries(buyBox).slice(0, 2).map(([k, v]) => `${k}: ${v}`).join(', ')
 
     return (
         <div
@@ -39,6 +44,22 @@ export function ContactCard({ contact, onClick }: ContactCardProps) {
                     <span className="truncate">{contact.phone || "No phone"}</span>
                 </div>
 
+                {/* Assets */}
+                {assets.length > 0 && (
+                    <div className="flex items-center gap-2 text-muted-foreground">
+                        <Building className="h-3.5 w-3.5 shrink-0" />
+                        <span className="truncate">{assets.slice(0, 3).join(', ')}</span>
+                    </div>
+                )}
+
+                {/* Buy Box */}
+                {buyBoxSummary && (
+                    <div className="flex items-center gap-2 text-muted-foreground">
+                        <Target className="h-3.5 w-3.5 shrink-0" />
+                        <span className="truncate text-xs">{buyBoxSummary}</span>
+                    </div>
+                )}
+
                 {/* Offers/Requests Summary */}
                 <div className="flex flex-wrap gap-1 mt-3 pt-2 border-t border-dashed border-border/50">
                     {contact.services?.filter((s: any) => s.type === 'offer' && !s.is_archived).slice(0, 2).map((s: any, i: number) => (
@@ -56,3 +77,4 @@ export function ContactCard({ contact, onClick }: ContactCardProps) {
         </div>
     )
 }
+

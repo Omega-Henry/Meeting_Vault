@@ -266,6 +266,40 @@ function ServiceCard({ service, onUpdate, isAdmin }: { service: any, onUpdate: (
         }
     }
 
+    const handleArchive = async () => {
+        if (!confirm('Archive this service? It will be hidden from the directory.')) return
+
+        setSaving(true)
+        const { error } = await supabase
+            .from('services')
+            .update({ is_archived: true, archive_reason: 'Manually archived by admin' })
+            .eq('id', service.id)
+
+        setSaving(false)
+        if (!error) {
+            onUpdate()
+        } else {
+            alert('Failed to archive service')
+        }
+    }
+
+    // If already archived, show differently
+    if (service.is_archived) {
+        return (
+            <div className="rounded-lg border p-4 bg-muted/30 opacity-60">
+                <div className="flex items-center justify-between mb-2">
+                    <span className="text-xs font-medium px-2 py-1 rounded-full bg-gray-200 text-gray-600">
+                        ARCHIVED
+                    </span>
+                    <span className="text-xs text-muted-foreground">
+                        {service.archive_reason || 'No reason'}
+                    </span>
+                </div>
+                <p className="text-sm line-through">{service.description}</p>
+            </div>
+        )
+    }
+
     return (
         <div className="rounded-lg border p-4 bg-card">
             <div className="flex items-center justify-between mb-2">
@@ -279,12 +313,21 @@ function ServiceCard({ service, onUpdate, isAdmin }: { service: any, onUpdate: (
                         {service.contacts?.name || 'Unknown'}
                     </span>
                     {isAdmin && (
-                        <button
-                            onClick={() => setIsEditing(!isEditing)}
-                            className="text-xs text-primary hover:underline"
-                        >
-                            {isEditing ? 'Cancel' : 'Edit'}
-                        </button>
+                        <>
+                            <button
+                                onClick={() => setIsEditing(!isEditing)}
+                                className="text-xs text-primary hover:underline"
+                            >
+                                {isEditing ? 'Cancel' : 'Edit'}
+                            </button>
+                            <button
+                                onClick={handleArchive}
+                                disabled={saving}
+                                className="text-xs text-destructive hover:underline"
+                            >
+                                Archive
+                            </button>
+                        </>
                     )}
                 </div>
             </div>
@@ -321,3 +364,4 @@ function ServiceCard({ service, onUpdate, isAdmin }: { service: any, onUpdate: (
         </div>
     )
 }
+

@@ -1,10 +1,12 @@
 import { useEffect, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { Users, CheckSquare, MessageSquare, Briefcase } from 'lucide-react'
 import { useUserProfile } from '../hooks/useUserContext'
 
 export default function Dashboard() {
     const { profile } = useUserProfile()
+    const navigate = useNavigate()
     const [stats, setStats] = useState({
         contacts: 0,
         services: 0,
@@ -87,10 +89,16 @@ export default function Dashboard() {
                 <div className="rounded-lg border bg-card p-6">
                     <h3 className="font-semibold mb-4">Quick Actions</h3>
                     <div className="flex gap-4">
-                        <button className="px-4 py-2 bg-primary text-primary-foreground rounded-md text-sm font-medium hover:bg-primary/90">
+                        <button
+                            onClick={() => navigate('/admin/chats')}
+                            className="px-4 py-2 bg-primary text-primary-foreground rounded-md text-sm font-medium hover:bg-primary/90"
+                        >
                             Upload Chat
                         </button>
-                        <button className="px-4 py-2 border rounded-md text-sm font-medium hover:bg-muted">
+                        <button
+                            onClick={() => navigate('/admin/search')}
+                            className="px-4 py-2 border rounded-md text-sm font-medium hover:bg-muted"
+                        >
                             Search Database
                         </button>
                     </div>
