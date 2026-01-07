@@ -87,17 +87,10 @@ CREATE POLICY "Users see own usage" ON public.ai_usage
 -- Insert is done via service role, so no INSERT policy needed for users
 
 -- ============================================
--- 5. Update services to link by contact_id
+-- 5. Note: services.contact_id already exists in base schema
 -- ============================================
--- This is a data migration: link existing services to contacts by name match
--- Run this UPDATE after the schema changes above
-
-UPDATE public.services s
-SET contact_id = c.id
-FROM public.contacts c
-WHERE s.contact_name = c.name
-  AND s.contact_id IS NULL
-  AND c.is_archived IS NOT TRUE;
+-- The services table already links to contacts via contact_id (see schema.sql)
+-- No data migration needed here.
 
 -- ============================================
 -- 6. Add service source tracking
