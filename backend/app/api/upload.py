@@ -79,7 +79,7 @@ async def process_extraction_background(chat_id: str, user_id: str, org_id: str,
             
             contact_name_to_id[contact.name] = contact_id
 
-        # Insert Services
+        # Insert Services (with deduplication check)
         for service in extracted_data.services:
             contact_id = contact_name_to_id.get(service.contact_name)
             
@@ -95,6 +95,13 @@ async def process_extraction_background(chat_id: str, user_id: str, org_id: str,
                         "name": "Unattributed"
                     }).execute()
                     contact_id = res.data[0]["id"]
+
+            # Deduplication: Check if similar service already exists
+            existing_service = client.table("services").select("id").eq("contact_id", contact_id).eq("type", service.type).ilike("description", service.description[:50] + "%").execute()
+            
+            if existing_service.data:
+                logger.info(f"Skipping duplicate service: {service.description[:50]}...")
+                continue
 
             service_data = {
                 "user_id": user_id,
