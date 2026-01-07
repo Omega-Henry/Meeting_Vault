@@ -117,6 +117,22 @@ export default function ChatList() {
                     const isProcessing = chat.digest_bullets?.summary === 'Processing...';
                     const basePath = profile?.role === 'admin' ? '/admin/chats' : '/app/chats';
 
+                    const handleCancelProcessing = async (e: React.MouseEvent) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        if (!confirm('Mark this chat as failed? You can delete and re-upload it.')) return;
+
+                        // Update digest_bullets to indicate failure
+                        const { error } = await supabase
+                            .from('meeting_chats')
+                            .update({ digest_bullets: { summary: 'Extraction failed. Please delete and re-upload.', key_topics: [] } })
+                            .eq('id', chat.id);
+
+                        if (!error) {
+                            fetchChats();
+                        }
+                    };
+
                     return (
                         <Link
                             key={chat.id}
@@ -135,12 +151,22 @@ export default function ChatList() {
                                 <h3 className="font-semibold tracking-tight">{chat.meeting_name}</h3>
 
                                 {isProcessing ? (
-                                    <div className="flex items-center gap-2 text-sm text-amber-600 font-medium">
-                                        <span className="relative flex h-2 w-2">
-                                            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75"></span>
-                                            <span className="relative inline-flex rounded-full h-2 w-2 bg-amber-500"></span>
-                                        </span>
-                                        Processing Extraction...
+                                    <div className="space-y-2">
+                                        <div className="flex items-center gap-2 text-sm text-amber-600 font-medium">
+                                            <span className="relative flex h-2 w-2">
+                                                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75"></span>
+                                                <span className="relative inline-flex rounded-full h-2 w-2 bg-amber-500"></span>
+                                            </span>
+                                            Processing Extraction...
+                                        </div>
+                                        {profile?.role === 'admin' && (
+                                            <button
+                                                onClick={handleCancelProcessing}
+                                                className="text-xs text-destructive hover:underline"
+                                            >
+                                                Cancel / Mark Failed
+                                            </button>
+                                        )}
                                     </div>
                                 ) : (
                                     <p className="text-sm text-muted-foreground line-clamp-2">
