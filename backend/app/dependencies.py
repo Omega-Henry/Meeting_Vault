@@ -130,6 +130,13 @@ def get_user_context(
         role=membership["role"]
     )
 
+def require_auth(ctx: UserContext = Depends(get_user_context)) -> UserContext:
+    """
+    Dependency to ensure the user is authenticated and has a valid context.
+    Currently just an alias for get_user_context as that enforces auth.
+    """
+    return ctx
+
 def require_admin(ctx: UserContext = Depends(get_user_context)) -> UserContext:
     if ctx.role != "admin":
         raise HTTPException(status_code=403, detail="Admin privileges required")
