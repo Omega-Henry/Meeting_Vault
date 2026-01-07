@@ -12,11 +12,25 @@ interface Message {
 import ChangeRequestModal from './ChangeRequestModal'
 
 export default function AssistantPanel() {
-    const [messages, setMessages] = useState<Message[]>([
-        { role: 'assistant', content: 'Hello! I can help you find meetings, contacts, or services. What are you looking for?' }
-    ])
+    const [messages, setMessages] = useState<Message[]>(() => {
+        const saved = localStorage.getItem('ai_chat_history')
+        return saved ? JSON.parse(saved) : [
+            { role: 'assistant', content: 'Hello! I can help you find meetings, contacts, or services. What are you looking for?' }
+        ]
+    })
     const [input, setInput] = useState('')
     const [loading, setLoading] = useState(false)
+    const scrollRef = useRef<HTMLDivElement>(null)
+
+    useEffect(() => {
+        localStorage.setItem('ai_chat_history', JSON.stringify(messages))
+    }, [messages])
+
+    const clearChat = () => {
+        const initial: Message[] = [{ role: 'assistant', content: 'Chat history cleared. How can I help?' }]
+        setMessages(initial)
+        localStorage.removeItem('ai_chat_history')
+    }
     const scrollRef = useRef<HTMLDivElement>(null)
 
     // Edit Modal State
@@ -81,11 +95,18 @@ export default function AssistantPanel() {
 
     return (
         <div className="flex flex-col h-full">
-            <div className="p-4 border-b border-border bg-muted/20">
+            <div className="p-4 border-b border-border bg-muted/20 flex justify-between items-center">
                 <h2 className="font-semibold flex items-center">
                     <Bot className="mr-2 h-5 w-5" />
                     AI Assistant
                 </h2>
+                <button
+                    onClick={clearChat}
+                    className="text-xs text-muted-foreground hover:text-destructive transition-colors p-1"
+                    title="Clear Chat History"
+                >
+                    Clear Chat
+                </button>
             </div>
 
             <div className="flex-1 overflow-y-auto p-4 space-y-4" ref={scrollRef}>

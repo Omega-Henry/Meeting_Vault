@@ -82,18 +82,37 @@ export default function Dashboard() {
                     ))}
             </div>
 
-            {/* Recent Activity Placeholder or other widgets could go here */}
-            <div className="rounded-lg border bg-card p-6">
-                <h3 className="font-semibold mb-4">Quick Actions</h3>
-                <div className="flex gap-4">
-                    <button className="px-4 py-2 bg-primary text-primary-foreground rounded-md text-sm font-medium hover:bg-primary/90">
-                        Upload Chat
-                    </button>
-                    <button className="px-4 py-2 border rounded-md text-sm font-medium hover:bg-muted">
-                        Search Database
-                    </button>
+            {/* Quick Actions - Admin Only */}
+            {profile?.role === 'admin' && (
+                <div className="rounded-lg border bg-card p-6">
+                    <h3 className="font-semibold mb-4">Quick Actions</h3>
+                    <div className="flex gap-4">
+                        <button className="px-4 py-2 bg-primary text-primary-foreground rounded-md text-sm font-medium hover:bg-primary/90">
+                            Upload Chat
+                        </button>
+                        <button className="px-4 py-2 border rounded-md text-sm font-medium hover:bg-muted">
+                            Search Database
+                        </button>
+                    </div>
                 </div>
-            </div>
+            )}
+
+            {/* Member AI Promo */}
+            {profile?.role !== 'admin' && (
+                <div className="rounded-lg border bg-gradient-to-r from-primary/10 to-primary/5 p-8 flex flex-col md:flex-row items-center justify-between gap-6">
+                    <div className="space-y-2">
+                        <h3 className="text-xl font-bold">Need to find something?</h3>
+                        <p className="text-muted-foreground max-w-lg">
+                            Use the AI Assistant to query the database instantly. You can ask about service providers, meeting details, or specific contacts.
+                        </p>
+                    </div>
+                    <div className="flex-shrink-0">
+                        <div className="p-4 bg-background rounded-full shadow-sm animate-bounce">
+                            <MessageSquare className="h-8 w-8 text-primary" />
+                        </div>
+                    </div>
+                </div>
+            )}
         </div>
     )
 }
