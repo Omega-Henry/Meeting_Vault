@@ -45,14 +45,36 @@ def list_change_requests(
     """
     List change requests. Admins see all, users see their own (RLS handled by DB, but we can filter too).
     """
-    query = client.table("change_requests").select("*, contacts(name), services(description)")\
+    query = client.table("change_requests").select("*")\
         .eq("status", status)\
         .order("created_at", desc=True)\
         .limit(limit)
     
-    # RLS policies should handle visibility, but let's just run it.
     res = query.execute()
-    return res.data
+    data = res.data
+
+    # Manually fetch related names because we don't have polymorphic FKs
+    for req in data:
+        target_id = req.get("target_id")
+        target_type = req.get("target_type")
+        
+        req["contacts"] = None
+        req["services"] = None
+        
+        if target_id:
+            try:
+                if target_type == "contact":
+                    c_res = client.table("contacts").select("name").eq("id", target_id).execute()
+                    if c_res.data:
+                        req["contacts"] = {"name": c_res.data[0]["name"]}
+                elif target_type == "service":
+                    s_res = client.table("services").select("description").eq("id", target_id).execute()
+                    if s_res.data:
+                        req["services"] = {"description": s_res.data[0]["description"]}
+            except Exception:
+                pass # Ignore if target deleted or not found
+
+    return data
 
 @router.post("/{request_id}/review")
 def review_change_request(

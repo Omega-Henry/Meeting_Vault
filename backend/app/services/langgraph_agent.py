@@ -89,6 +89,7 @@ def planner_node(state: AgentState):
     3. If the user's intent is ambiguous (e.g., just a keyword), prioritize searching services and contacts.
     4. If the user asks for a type of service (e.g. "loans"), try to infer if they want 'offers' or 'requests', or just search everything.
     5. Be concise. Summarize what you found.
+    6. CRITICAL: If you call a tool that returns a list of items (services, contacts, chats), DO NOT list them in your text response. The UI will automatically render a card view for them. Only provide a brief 1-sentence summary (e.g., "Here are the top 5 services found:" or "I found 3 contacts matching your query.").
     """)
     
     messages = [system_msg] + state["messages"]

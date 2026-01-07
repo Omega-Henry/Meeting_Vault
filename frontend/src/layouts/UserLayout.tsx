@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { Routes, Route } from 'react-router-dom'
-import { LayoutDashboard, Users, CheckSquare, MessageSquare } from 'lucide-react'
+import { LayoutDashboard, Users, CheckSquare, MessageSquare, Briefcase } from 'lucide-react'
 import AssistantPanel from '../components/AssistantPanel'
 import UserContacts from '../pages/user/UserContacts'
 import UserServices from '../pages/user/UserServices'
@@ -9,10 +9,12 @@ import ChatDetail from '../pages/ChatDetail'
 import Sidebar from '../components/layout/Sidebar'
 import ResizableAside from '../components/layout/ResizableAside'
 import FeedbackModal from '../components/FeedbackModal'
+import Dashboard from '../pages/Dashboard'
 
 export default function UserLayout() {
     const navItems = [
-        { name: 'Offers', href: '/app/offers', icon: LayoutDashboard },
+        { name: 'Dashboard', href: '/app', icon: LayoutDashboard },
+        { name: 'Offers', href: '/app/offers', icon: Briefcase },
         { name: 'Requests', href: '/app/requests', icon: CheckSquare },
         { name: 'Contacts', href: '/app/contacts', icon: Users },
         { name: 'Chats', href: '/app/chats', icon: MessageSquare }, // Added Chats
@@ -41,6 +43,7 @@ export default function UserLayout() {
             {/* Main Content */}
             <div className="flex-1 overflow-auto p-4 lg:p-8">
                 <Routes>
+                    <Route path="/" element={<Dashboard />} />
                     <Route path="/offers" element={<UserServices type="offer" />} />
                     <Route path="/requests" element={<UserServices type="request" />} />
                     <Route path="/contacts" element={<UserContacts />} />

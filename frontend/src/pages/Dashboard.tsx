@@ -1,85 +1,98 @@
-import { } from 'react'
-import { Routes, Route, Link, useLocation } from 'react-router-dom'
-import { LayoutDashboard, MessageSquare, Users, Link as LinkIcon, Search, LogOut } from 'lucide-react'
+import { useEffect, useState } from 'react'
 import { supabase } from '../lib/supabase'
-import clsx from 'clsx'
-import AssistantPanel from '../components/AssistantPanel'
-import { ThemeToggle } from '../components/ThemeToggle'
-import ChatList from './ChatList'
-import ChatDetail from './ChatDetail'
-import ContactsTable from './ContactsTable'
-import ServicesTable from './ServicesTable'
-import LinksTable from './LinksTable'
-import GlobalSearch from './GlobalSearch'
+import { Users, CheckSquare, MessageSquare, Briefcase } from 'lucide-react'
+import { useUserProfile } from '../hooks/useUserContext'
 
 export default function Dashboard() {
-    const location = useLocation()
+    const { profile } = useUserProfile()
+    const [stats, setStats] = useState({
+        contacts: 0,
+        services: 0,
+        chats: 0,
+        requests: 0
+    })
+    const [loading, setLoading] = useState(true)
 
-    const navItems = [
-        { name: 'Chats', href: '/', icon: MessageSquare },
-        { name: 'Contacts', href: '/contacts', icon: Users },
-        { name: 'Services', href: '/services', icon: LayoutDashboard },
-        { name: 'Links', href: '/links', icon: LinkIcon },
-        { name: 'Search', href: '/search', icon: Search },
+    useEffect(() => {
+        fetchStats()
+    }, [profile])
+
+    const fetchStats = async () => {
+        if (!profile) return
+        setLoading(true)
+
+        try {
+            // Parallel fetch for simplified stats
+            // Note: RLS will automatically scope these counts to what the user can see.
+            // For Admins: All. For Users: Their own / Org's.
+
+            const [contacts, services, chats, requests] = await Promise.all([
+                supabase.from('contacts').select('*', { count: 'exact', head: true }),
+                supabase.from('services').select('*', { count: 'exact', head: true }),
+                supabase.from('meeting_chats').select('*', { count: 'exact', head: true }),
+                supabase.from('change_requests').select('*', { count: 'exact', head: true }).eq('status', 'pending')
+            ])
+
+            setStats({
+                contacts: contacts.count || 0,
+                services: services.count || 0,
+                chats: chats.count || 0,
+                requests: requests.count || 0
+            })
+        } catch (error) {
+            console.error("Error fetching stats:", error)
+        } finally {
+            setLoading(false)
+        }
+    }
+
+    const statCards = [
+        { label: 'Total Contacts', value: stats.contacts, icon: Users, color: 'text-blue-600', bg: 'bg-blue-100' },
+        { label: 'Active Services', value: stats.services, icon: Briefcase, color: 'text-purple-600', bg: 'bg-purple-100' },
+        { label: 'Meeting Chats', value: stats.chats, icon: MessageSquare, color: 'text-green-600', bg: 'bg-green-100' },
+        { label: 'Pending Requests', value: stats.requests, icon: CheckSquare, color: 'text-amber-600', bg: 'bg-amber-100', adminOnly: true },
     ]
 
     return (
-        <div className="flex h-screen bg-background text-foreground">
-            {/* Sidebar */}
-            <div className="w-64 border-r border-border bg-card p-4 flex flex-col">
-                <div className="mb-8 flex items-center justify-between px-2">
-                    <h1 className="text-xl font-bold">MeetingVault</h1>
-                    <ThemeToggle />
-                </div>
+        <div className="space-y-8">
+            <div>
+                <h1 className="text-3xl font-bold tracking-tight">Dashboard</h1>
+                <p className="text-muted-foreground mt-2">
+                    Welcome back, {profile?.email}. Here's an overview of your workspace.
+                </p>
+            </div>
 
-                <nav className="space-y-1 flex-1">
-                    {navItems.map((item) => {
-                        const Icon = item.icon
-                        const isActive = location.pathname === item.href || (item.href !== '/' && location.pathname.startsWith(item.href))
-                        return (
-                            <Link
-                                key={item.name}
-                                to={item.href}
-                                className={clsx(
-                                    'flex items-center rounded-md px-2 py-2 text-sm font-medium transition-colors',
-                                    isActive
-                                        ? 'bg-primary text-primary-foreground'
-                                        : 'text-muted-foreground hover:bg-muted hover:text-foreground'
+            <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+                {statCards
+                    .filter(card => !card.adminOnly || profile?.role === 'admin')
+                    .map((card, i) => (
+                        <div key={i} className="p-6 rounded-lg border bg-card text-card-foreground shadow-sm flex items-center space-x-4">
+                            <div className={`p-3 rounded-full ${card.bg}`}>
+                                <card.icon className={`h-6 w-6 ${card.color}`} />
+                            </div>
+                            <div>
+                                <p className="text-sm font-medium text-muted-foreground">{card.label}</p>
+                                {loading ? (
+                                    <div className="h-6 w-16 bg-muted animate-pulse rounded mt-1"></div>
+                                ) : (
+                                    <h3 className="text-2xl font-bold">{card.value}</h3>
                                 )}
-                            >
-                                <Icon className="mr-3 h-5 w-5" />
-                                {item.name}
-                            </Link>
-                        )
-                    })}
-                </nav>
+                            </div>
+                        </div>
+                    ))}
+            </div>
 
-                <div className="mt-auto border-t border-border pt-4">
-                    <button
-                        onClick={() => supabase.auth.signOut()}
-                        className="flex w-full items-center rounded-md px-2 py-2 text-sm font-medium text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
-                    >
-                        <LogOut className="mr-3 h-5 w-5" />
-                        Sign Out
+            {/* Recent Activity Placeholder or other widgets could go here */}
+            <div className="rounded-lg border bg-card p-6">
+                <h3 className="font-semibold mb-4">Quick Actions</h3>
+                <div className="flex gap-4">
+                    <button className="px-4 py-2 bg-primary text-primary-foreground rounded-md text-sm font-medium hover:bg-primary/90">
+                        Upload Chat
+                    </button>
+                    <button className="px-4 py-2 border rounded-md text-sm font-medium hover:bg-muted">
+                        Search Database
                     </button>
                 </div>
-            </div>
-
-            {/* Main Content */}
-            <div className="flex-1 overflow-auto p-8">
-                <Routes>
-                    <Route path="/" element={<ChatList />} />
-                    <Route path="/chats/:id" element={<ChatDetail />} />
-                    <Route path="/contacts" element={<ContactsTable />} />
-                    <Route path="/services" element={<ServicesTable />} />
-                    <Route path="/links" element={<LinksTable />} />
-                    <Route path="/search" element={<GlobalSearch />} />
-                </Routes>
-            </div>
-
-            {/* Assistant Panel */}
-            <div className="w-96 border-l border-border bg-card">
-                <AssistantPanel />
             </div>
         </div>
     )

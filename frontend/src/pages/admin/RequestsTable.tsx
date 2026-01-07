@@ -12,20 +12,27 @@ export default function RequestsTable() {
 
     const fetchRequests = async () => {
         setLoading(true)
-        const { data: { session } } = await supabase.auth.getSession()
-        if (!session) return
+        try {
+            const { data: { session } } = await supabase.auth.getSession()
+            if (!session) return
 
-        const res = await fetch(`${import.meta.env.VITE_API_BASE_URL || ''}/api/change-requests?status=pending`, {
-            headers: {
-                'Authorization': `Bearer ${session.access_token}`
+            const res = await fetch(`${import.meta.env.VITE_API_BASE_URL || ''}/api/change-requests?status=pending`, {
+                headers: {
+                    'Authorization': `Bearer ${session.access_token}`
+                }
+            })
+
+            if (res.ok) {
+                const data = await res.json()
+                setRequests(data)
+            } else {
+                console.error("Failed to fetch requests", res.status)
             }
-        })
-
-        if (res.ok) {
-            const data = await res.json()
-            setRequests(data)
+        } catch (error) {
+            console.error("Error fetching requests:", error)
+        } finally {
+            setLoading(false)
         }
-        setLoading(false)
     }
 
     const handleReview = async (id: string, action: 'approve' | 'reject') => {
