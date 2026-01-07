@@ -17,7 +17,7 @@ def list_contacts(
     """
     List contacts in the user's organization.
     """
-    query = client.table("contacts").select("*, services(id, type)").eq("org_id", ctx.org_id)
+    query = client.table("contacts").select("*, services(id, type, description, is_archived), profile:contact_profiles(*)").eq("org_id", ctx.org_id)
     
     if q:
         # Simple ILIKE search on name or email

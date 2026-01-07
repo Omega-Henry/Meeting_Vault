@@ -28,11 +28,20 @@ def search_contacts(client: Client, query: str) -> List[Dict[str, Any]]:
     # Supabase/Postgres simple ILIKE search for MVP
     # For more complex search we'd use full text search
     res = client.table("contacts")\
-        .select("*")\
+        .select("*, profile:contact_profiles(*)")\
         .or_(f"name.ilike.%{query}%,email.ilike.%{query}%,phone.ilike.%{query}%")\
         .limit(20)\
         .execute()
-    return res.data
+    
+    # Normalize profile
+    data = res.data
+    for c in data:
+        if isinstance(c.get("profile"), list) and c["profile"]:
+            c["profile"] = c["profile"][0]
+        elif isinstance(c.get("profile"), list) and not c["profile"]:
+            c["profile"] = {}
+            
+    return data
 
 def list_services(client: Client, type_filter: Optional[str] = None) -> List[Dict[str, Any]]:
     """List services (offers/requests). Optional type_filter: 'offer' or 'request'."""

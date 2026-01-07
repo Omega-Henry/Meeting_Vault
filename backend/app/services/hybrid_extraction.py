@@ -188,6 +188,65 @@ async def analyze_chunk(messages_chunk: List[CleanedMessage], chunk_index: int) 
         logger.error(f"LLM Chunk Analysis Failed (Chunk {chunk_index}): {e}")
         return IntentAnalysis(services=[], noise_message_ids=[])
 
+class ValidationResult(BaseModel):
+    is_valid: bool = Field(description="True if this is a legitimate business offer/request.")
+    reason: str = Field(description="Reason for invalidity if False.")
+
+class ValidatedServiceList(BaseModel):
+    results: List[ValidationResult]
+
+async def validate_services(services: List[ExtractedService]) -> List[ExtractedService]:
+    """Stage 2: Relevance Validator. Filters out non-business items."""
+    if not services or not settings.OPENROUTER_API_KEY:
+        return services
+
+    # Batch process all services
+    # We send them to LLM to check validity
+    try:
+        llm = ChatOpenAI(
+            model=settings.LLM_MODEL, # Use same model or cheaper one
+            api_key=settings.OPENROUTER_API_KEY,
+            base_url=settings.OPENROUTER_BASE_URL,
+            temperature=0
+        )
+        structured_llm = llm.with_structured_output(ValidatedServiceList)
+        
+        items_text = "\n".join([f"{i}. [{s.type.upper()}] {s.description}" for i, s in enumerate(services)])
+        
+        prompt = f"""
+        You are a Quality Control Validator for a Business Database (Real Estate & Finance focus).
+        Review the following extracted items and determine if they are legitimate business offers or requests.
+        
+        CRITERIA FOR VALIDITY:
+        - Must be a clear business proposition (Capital, Deals, Services, Jobs, Advice).
+        - REJECT: "I need coffee", "Can you hear me?", "I am here", "Interested", "Me too", "Sent DM", "Check email".
+        - REJECT: Vague statements without context ("I have one", "Yes please").
+        
+        Items to Validate:
+        {items_text}
+        
+        Return a list of validation results matching the order of input items.
+        """
+        
+        res = await structured_llm.ainvoke(prompt)
+        
+        validated_services = []
+        if res and len(res.results) == len(services):
+            for i, result in enumerate(res.results):
+                if result.is_valid:
+                    validated_services.append(services[i])
+                else:
+                    logger.info(f"Validator Dropped: {services[i].description} (Reason: {result.reason})")
+        else:
+            logger.warning("Validator returned mismatched count or failed. Keeping all.")
+            return services
+            
+        return validated_services
+        
+    except Exception as e:
+        logger.error(f"Validator Failed: {e}")
+        return services
+
 async def extract_summary_with_llm(text: str) -> MeetingSummary:
     """Pass 3: Summary Generation."""
     if not settings.OPENROUTER_API_KEY:
@@ -256,6 +315,11 @@ async def extract_meeting_data(text: str) -> ExtractedMeetingData:
             all_noise_ids.update(res.noise_message_ids)
     
     logger.info(f"Merged Parallel Results: {len(all_services)} services, {len(all_noise_ids)} noise items.")
+
+    # 3.5 Stage 2: Relevance Validator
+    logger.info("Running Relevance Validator...")
+    all_services = await validate_services(all_services)
+    logger.info(f"Post-Validation Services: {len(all_services)}")
 
     # 4. Strict Regex Noise Filter (Post-Processing)
     # Catches short "Yes/No/Lol" messages that LLM might miss or classify as "Chat" instead of "Noise"

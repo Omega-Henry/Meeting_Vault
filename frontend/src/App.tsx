@@ -1,5 +1,6 @@
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom'
 import Login from './pages/Login'
+import Onboarding from './pages/Onboarding'
 import AdminLayout from './layouts/AdminLayout'
 import UserLayout from './layouts/UserLayout'
 import { ThemeProvider } from './components/ThemeProvider'
@@ -17,6 +18,7 @@ function App() {
             <Router>
                 <Routes>
                     <Route path="/login" element={!profile ? <Login /> : <Navigate to="/" />} />
+                    <Route path="/onboarding" element={profile ? <Onboarding /> : <Navigate to="/login" />} />
 
                     {/* Admin Routes */}
                     <Route path="/admin/*" element={

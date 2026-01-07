@@ -119,81 +119,132 @@ def merge_contacts(
 ):
     """
     Executes a merge of multiple contacts into a primary contact.
+    Handles profiles, aliases, services, and ownership.
     """
     primary_id = request.primary_contact_id
     dup_ids = request.duplicate_contact_ids
     
-    # Validate
     if primary_id in dup_ids:
          raise HTTPException(status_code=400, detail="Primary ID cannot be in duplicate list")
 
-    # 1. Fetch all involved contacts
     all_ids = [primary_id] + dup_ids
-    res = client.table("contacts").select("*").in_("id", all_ids).execute()
+    res = client.table("contacts").select("*, profile:contact_profiles(*)").in_("id", all_ids).execute()
     contacts = res.data
     
     if len(contacts) != len(all_ids):
         raise HTTPException(status_code=404, detail="One or more contacts not found")
         
     primary_contact = next((c for c in contacts if c["id"] == primary_id), None)
+    duplicates = [c for c in contacts if c["id"] in dup_ids]
     
-    # 2. Update Services
-    # Reassign services from dup_ids to primary_id
+    # 0. Check Ownership / Claims
+    # If duplicates are claimed by different users, we have a conflict.
+    primary_owner = primary_contact.get("claimed_by_user_id")
+    claiming_users = set()
+    if primary_owner:
+        claiming_users.add(primary_owner)
+    
+    for d in duplicates:
+        if d.get("claimed_by_user_id"):
+            claiming_users.add(d["claimed_by_user_id"])
+            
+    if len(claiming_users) > 1:
+        raise HTTPException(status_code=409, detail="Cannot merge: Multiple different users validly claim these contacts.")
+    
+    # If primary is unclaimed but a duplicate is, transfer ownership
+    new_owner = list(claiming_users)[0] if claiming_users else None
+    
+    # 1. Update Services & Links
     client.table("services").update({"contact_id": primary_id}).in_("contact_id", dup_ids).execute()
-    
-    # 3. Update Contact Links (if table exists and used)
-    # Check if table exists/is used? We assume migration ran.
-    try:
-        client.table("contact_links").update({"contact_id": primary_id}).in_("contact_id", dup_ids).execute()
-    except Exception:
-        # Ignore if table missing or something (MVP robustness)
-        pass
+    # Also transfer claim requests?
+    client.table("claim_requests").update({"contact_id": primary_id}).in_("contact_id", dup_ids).execute()
 
-    # 4. Merge Fields (Best Effort)
-    # If primary has missing email/phone, take from duplicates
+    # 2. Handle Aliases (Create alias from duplicate names)
+    # We want to remember that 'John Doe' (dup) is now 'Jonathan Doe' (primary)
+    # Check if contact_aliases table exists (from migration 006)
+    existing_aliases = client.table("contact_aliases").select("alias").eq("contact_id", primary_id).execute()
+    current_alias_names = {a['alias'].lower() for a in existing_aliases.data}
+    
+    new_aliases = []
+    for d in duplicates:
+        name = d.get("name")
+        if name and name.lower() != "unattributed" and name.lower() not in current_alias_names:
+            if name != primary_contact.get("name"): # Don't alias if exact match
+                new_aliases.append({
+                    "contact_id": primary_id,
+                    "alias": name,
+                    "source_meeting_id": None # We don't have this easy context here, optional
+                })
+                current_alias_names.add(name.lower())
+    
+    if new_aliases:
+        client.table("contact_aliases").insert(new_aliases).execute()
+
+    # 3. Merge Fields (Best Effort) to Primary
     updates = {}
+    if new_owner and new_owner != primary_owner:
+        updates["claimed_by_user_id"] = new_owner
+
     if not primary_contact.get("email"):
-        for d in contacts:
+        for d in duplicates:
             if d.get("email"):
                 updates["email"] = d["email"]
                 break
+    
     if not primary_contact.get("phone"):
-        for d in contacts:
+        for d in duplicates:
             if d.get("phone"):
                 updates["phone"] = d["phone"]
                 break
-                
-    # Union of links array (if using JSON/Array column in contacts)
-    primary_links = set(primary_contact.get("links") or [])
-    for c in contacts:
-        if c["id"] in dup_ids:
-            for l in (c.get("links") or []):
-                primary_links.add(l)
-    
-    if len(primary_links) > len(primary_contact.get("links") or []):
-         updates["links"] = list(primary_links)
-         
+
+    # 4. Handle Profile (Simple: Only create if primary missing)
+    # If primary has no profile (profile field is null or empty list/obj), try to copy from duplicates?
+    # RLS fetch usually returns 'profile' as list or object.
+    # Assuming primary_contact['profile'] is the profile data.
+    primary_profile = primary_contact.get("profile")
+    if not primary_profile: 
+        # Find first duplicate with a profile
+        for d in duplicates:
+            if d.get("profile"):
+                # We need to INSERT a new profile for primary, copying data from d['profile']
+                # But 'profile' in response is the joined data.
+                # We need the raw profile row.
+                # Actually, simpler: Just update the duplicate's profile to point to primary_id?
+                # RLS might block if checks old parent? No, usually check new parent.
+                # Let's try: Update contact_profiles set contact_id = primary_id where contact_id = d.id
+                # Only need to do this ONCE.
+                d_profile = d["profile"] 
+                # d_profile is the dict. 
+                # We can't easily get the ID unless we selected it?
+                # Using contact_id is safer.
+                try:
+                    client.table("contact_profiles").update({"contact_id": primary_id}).eq("contact_id", d["id"]).execute()
+                    # Once we moved one, stop. We don't want multiple profiles if 1:1.
+                    break 
+                except Exception as e:
+                    logger.warning(f"Failed to move profile: {e}")
+                    pass
+
     if updates:
         client.table("contacts").update(updates).eq("id", primary_id).execute()
 
-    # 5. Archive Duplicates (Soft Delete)
+    # 5. Archive Duplicates
     client.table("contacts").update({"is_archived": True}).in_("id", dup_ids).execute()
 
-    # 6. Create Audit Log (Safeguarded)
+    # 6. Audit
     try:
-        audit_entry = {
-           "org_id": ctx.org_id,
-           "user_id": ctx.user.id,
-           "primary_contact_id": primary_id,
-           "merged_contact_ids": dup_ids,
-           "timestamp": datetime.datetime.now().isoformat(),
-           "details": {"reason": "Admin Manual Merge", "updates": updates}
-        }
-        client.table("merge_audit_log").insert(audit_entry).execute()
-    except Exception as e:
-        logger.warning(f"Failed to write merge audit log: {e}")
+        client.table("audit_log").insert({
+            "org_id": ctx.org_id,
+            "entity_type": "contact",
+            "entity_id": primary_id,
+            "action": "merged",
+            "actor_id": ctx.user.id,
+            "changes": {"merged_ids": dup_ids, "transferred_ownership": str(new_owner)}
+        }).execute()
+    except Exception:
+        pass
     
-    return {"status": "success", "message": f"Merged {len(dup_ids)} contacts into {primary_id}"}
+    return {"status": "success", "message": f"Merged {len(dup_ids)} contacts"}
 
 @router.patch("/contacts/{contact_id}", response_model=dict)
 def update_contact(
@@ -226,6 +277,18 @@ def delete_contact(
     """
     client.table("contacts").update({"is_archived": True}).eq("id", contact_id).execute()
     return {"status": "success"}
+
+@router.get("/review-queue", response_model=List[Dict[str, Any]])
+def get_review_queue(
+    limit: int = 50,
+    ctx: UserContext = Depends(require_admin),
+    client: Client = Depends(get_supabase_client)
+):
+    """
+    Fetch recent services for review.
+    """
+    res = client.table("services").select("*, contacts(name, email)").order("created_at", desc=True).limit(limit).execute()
+    return res.data
 
 @router.get("/contacts/search", response_model=List[dict])
 def search_contacts(

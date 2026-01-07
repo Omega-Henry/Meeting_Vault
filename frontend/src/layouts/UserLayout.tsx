@@ -11,13 +11,16 @@ import ResizableAside from '../components/layout/ResizableAside'
 import FeedbackModal from '../components/FeedbackModal'
 import Dashboard from '../pages/Dashboard'
 
+import MyProfile from '../pages/user/MyProfile'
+
 export default function UserLayout() {
     const navItems = [
         { name: 'Dashboard', href: '/app', icon: LayoutDashboard },
+        { name: 'My Profile', href: '/app/profile', icon: Users }, // Replaces "Contacts"? No. 
         { name: 'Offers', href: '/app/offers', icon: Briefcase },
         { name: 'Requests', href: '/app/requests', icon: CheckSquare },
         { name: 'Contacts', href: '/app/contacts', icon: Users },
-        { name: 'Chats', href: '/app/chats', icon: MessageSquare }, // Added Chats
+        { name: 'Chats', href: '/app/chats', icon: MessageSquare },
     ]
 
 
@@ -44,6 +47,7 @@ export default function UserLayout() {
             <div className="flex-1 overflow-auto p-4 lg:p-8">
                 <Routes>
                     <Route path="/" element={<Dashboard />} />
+                    <Route path="/profile" element={<MyProfile />} />
                     <Route path="/offers" element={<UserServices type="offer" />} />
                     <Route path="/requests" element={<UserServices type="request" />} />
                     <Route path="/contacts" element={<UserContacts />} />

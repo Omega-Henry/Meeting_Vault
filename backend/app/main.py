@@ -27,7 +27,7 @@ app.add_middleware(
 def health_check():
     return {"status": "ok"}
 
-from app.api import upload, assistant, chats, directory, change_requests, users, admin, feedback
+from app.api import upload, assistant, chats, directory, change_requests, users, admin, feedback, auth, claims, requests, services
 
 app.include_router(upload.router, prefix="/api")
 app.include_router(assistant.router, prefix="/api")
@@ -37,5 +37,7 @@ app.include_router(change_requests.router, prefix="/api/change-requests", tags=[
 app.include_router(users.router, prefix="/api/users", tags=["Users"])
 app.include_router(admin.router, prefix="/api/admin", tags=["Admin"])
 app.include_router(feedback.router, prefix="/api/feedback", tags=["Feedback"])
-
-
+app.include_router(auth.router, prefix="/api/auth", tags=["Auth"])
+app.include_router(claims.router, prefix="/api/claims", tags=["Claims"])
+app.include_router(services.router, prefix="/api/services", tags=["Services"])
+app.include_router(profiles.router, prefix="/api/profiles", tags=["profiles"])

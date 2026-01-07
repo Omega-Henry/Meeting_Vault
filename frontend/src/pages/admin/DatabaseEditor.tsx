@@ -25,6 +25,7 @@ export default function DatabaseEditor() {
     const [searchQuery, setSearchQuery] = useState('')
     const [searchResults, setSearchResults] = useState<any[]>([])
     const [searching, setSearching] = useState(false)
+    const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
 
     // Scan Implementation
     const runScan = async () => {
@@ -32,7 +33,7 @@ export default function DatabaseEditor() {
         try {
             const { data: { session } } = await supabase.auth.getSession()
             const token = session?.access_token
-            const res = await fetch(`${import.meta.env.VITE_API_BASE_URL}/api/admin/scan-duplicates`, {
+            const res = await fetch(`${import.meta.env.VITE_API_BASE_URL || ''}/api/admin/scan-duplicates`, {
                 method: 'POST',
                 headers: { 'Authorization': `Bearer ${token}` }
             })
@@ -48,11 +49,11 @@ export default function DatabaseEditor() {
     }
 
     const mergeContacts = async (primaryId: string, duplicateIds: string[]) => {
-        if (!confirm("This will merge contacts. Continue?")) return
+        if (!confirm(`Merging ${duplicateIds.length} contact(s) into ${primaryId}. This cannot be undone. Continue?`)) return
         try {
             const { data: { session } } = await supabase.auth.getSession()
             const token = session?.access_token
-            const res = await fetch(`${import.meta.env.VITE_API_BASE_URL}/api/admin/contacts/merge`, {
+            const res = await fetch(`${import.meta.env.VITE_API_BASE_URL || ''}/api/admin/contacts/merge`, {
                 method: 'POST',
                 headers: {
                     'Authorization': `Bearer ${token}`,
@@ -63,8 +64,15 @@ export default function DatabaseEditor() {
             if (res.ok) {
                 alert("Merge successful")
                 setSuggestions(prev => prev.filter(s => s.proposed_primary_contact_id !== primaryId))
+                // Clear selection if valid
+                setSelectedIds(new Set())
+                // Refresh search if active
+                if (activeTab === 'manual' && searchQuery) {
+                    handleSearch(new Event('submit') as any)
+                }
             } else {
-                alert("Merge failed")
+                const err = await res.json()
+                alert(`Merge failed: ${err.detail || 'Unknown error'}`)
             }
         } catch (err) {
             console.error(err)
@@ -74,16 +82,17 @@ export default function DatabaseEditor() {
 
     // Manual Operations
     const handleSearch = async (e: React.FormEvent) => {
-        e.preventDefault()
+        if (e) e.preventDefault()
         setSearching(true)
         try {
             const { data: { session } } = await supabase.auth.getSession()
             const token = session?.access_token
-            const res = await fetch(`${import.meta.env.VITE_API_BASE_URL}/api/admin/contacts/search?q=${searchQuery}`, {
+            const res = await fetch(`${import.meta.env.VITE_API_BASE_URL || ''}/api/admin/contacts/search?q=${encodeURIComponent(searchQuery)}`, {
                 headers: { 'Authorization': `Bearer ${token}` }
             })
             const data = await res.json()
             setSearchResults(data)
+            setSelectedIds(new Set()) // Reset selection on new search
         } catch (err) {
             console.error(err)
         } finally {
@@ -101,6 +110,31 @@ export default function DatabaseEditor() {
             console.error(err)
             alert("Failed to delete contact")
         }
+    }
+
+    const toggleSelection = (id: string) => {
+        const newSet = new Set(selectedIds)
+        if (newSet.has(id)) {
+            newSet.delete(id)
+        } else {
+            newSet.add(id)
+        }
+        setSelectedIds(newSet)
+    }
+
+    const handleManualMerge = () => {
+        if (selectedIds.size < 2) return
+        const ids = Array.from(selectedIds)
+        // Heuristic: Pick the first or the one with most info? 
+        // Logic: Let user pick? For MVP, we'll pick the one with most fields populated in the current list context 
+        // OR just the first one selected as primary.
+        // Better: Prompt user? Defaulting to first ID in the array as Primary.
+        // Actually, let's look at searchResults to find the 'best' one. 
+        // We'll trust the first one in the list order as 'Primary' if user selected top-down.
+        // Or maybe just the first one.
+        const primaryId = ids[0]
+        const duplicates = ids.slice(1)
+        mergeContacts(primaryId, duplicates)
     }
 
     return (
@@ -183,7 +217,7 @@ export default function DatabaseEditor() {
                         <input
                             type="text"
                             placeholder="Search contacts by name, email, or phone..."
-                            className="flex-1 bg-input border border-input rounded px-3 py-2"
+                            className="flex-1 bg-input border border-input rounded px-3 py-2 text-foreground"
                             value={searchQuery}
                             onChange={e => setSearchQuery(e.target.value)}
                         />
@@ -192,17 +226,39 @@ export default function DatabaseEditor() {
                         </button>
                     </form>
 
+                    {selectedIds.size > 0 && (
+                        <div className="mb-4 p-2 bg-primary/10 border border-primary/20 rounded flex items-center justify-between">
+                            <span className="text-sm font-medium ml-2">{selectedIds.size} selected</span>
+                            <button
+                                onClick={handleManualMerge}
+                                disabled={selectedIds.size < 2}
+                                className="bg-primary text-primary-foreground px-3 py-1.5 rounded text-sm flex items-center hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed shadow-sm"
+                            >
+                                <Merge className="h-3.5 w-3.5 mr-1.5" />
+                                Merge Selected
+                            </button>
+                        </div>
+                    )}
+
                     <div className="space-y-2">
                         {searchResults.map((c) => (
-                            <div key={c.id} className="flex items-center justify-between p-3 border border-border rounded bg-card">
-                                <div>
-                                    <div className="font-medium">{c.name || "No Name"}</div>
-                                    <div className="text-sm text-muted-foreground">{c.email} • {c.phone}</div>
+                            <div key={c.id} className={`flex items-center justify-between p-3 border rounded bg-card transition-colors ${selectedIds.has(c.id) ? 'border-primary ring-1 ring-primary' : 'border-border'}`}>
+                                <div className="flex items-center gap-3 overflow-hidden">
+                                    <input
+                                        type="checkbox"
+                                        checked={selectedIds.has(c.id)}
+                                        onChange={() => toggleSelection(c.id)}
+                                        className="h-4 w-4 rounded border-gray-300 text-primary focus:ring-primary"
+                                    />
+                                    <div className="min-w-0">
+                                        <div className="font-medium truncate">{c.name || "No Name"}</div>
+                                        <div className="text-sm text-muted-foreground truncate">{c.email} • {c.phone}</div>
+                                    </div>
                                 </div>
-                                <div className="flex gap-2">
+                                <div className="flex gap-2 shrink-0">
                                     <button
                                         onClick={() => navigate(`/admin/contacts?search=${encodeURIComponent(c.name || c.email || '')}`)}
-                                        className="p-2 hover:bg-muted rounded"
+                                        className="p-2 hover:bg-muted rounded text-muted-foreground hover:text-foreground"
                                         title="Edit in Contacts"
                                     >
                                         <Edit className="h-4 w-4" />
@@ -217,6 +273,11 @@ export default function DatabaseEditor() {
                                 </div>
                             </div>
                         ))}
+                        {searchResults.length === 0 && !searching && searchQuery && (
+                            <div className="text-center py-8 text-muted-foreground">
+                                No contacts found.
+                            </div>
+                        )}
                     </div>
                 </div>
             )}
