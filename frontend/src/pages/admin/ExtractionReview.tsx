@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { supabase } from '../../lib/supabase'
-import { CheckCircle, XCircle, AlertTriangle, ExternalLink, Archive } from 'lucide-react'
+import { Archive } from 'lucide-react'
 import clsx from 'clsx'
 
 export default function ExtractionReview() {

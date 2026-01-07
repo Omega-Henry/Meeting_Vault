@@ -247,8 +247,7 @@ function AddServiceForm({ contactId, type, onSuccess }: { contactId: string, typ
 
             if (res.ok) {
                 setDesc('')
-                alert("Added! Please close and reopen to see changes (Live update pending).")
-                // Ideally trigger parent refetch
+                onSuccess()
             } else {
                 alert("Failed to add service")
             }

@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { supabase } from '../../lib/supabase'
-import { ScrollText, Clock, User, Activity } from 'lucide-react'
+import { Activity } from 'lucide-react'
 import clsx from 'clsx'
 
 export default function AuditLogViewer() {

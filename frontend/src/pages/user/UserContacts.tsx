@@ -9,7 +9,7 @@ import ChangeRequestModal from '../../components/ChangeRequestModal'
 export default function UserContacts() {
     const [contacts, setContacts] = useState<any[]>([])
     const [loading, setLoading] = useState(true)
-    const [searchParams, setSearchParams] = useSearchParams()
+    const [searchParams] = useSearchParams()
     const [search, setSearch] = useState(searchParams.get('q') || searchParams.get('search') || '')
 
     // Modal State
