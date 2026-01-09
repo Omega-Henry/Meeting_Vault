@@ -214,13 +214,25 @@ async def validate_services(services: List[ExtractedService]) -> List[ExtractedS
         items_text = "\n".join([f"{i}. [{s.type.upper()}] {s.description}" for i, s in enumerate(services)])
         
         prompt = f"""
-        You are a Quality Control Validator for a Business Database (Real Estate & Finance focus).
-        Review the following extracted items and determine if they are legitimate business offers or requests.
+        You are a STRICT Quality Control Validator for a Real Estate & Creative Finance Business Database.
+        Your job is to REJECT anything that is NOT a clear, actionable business offer or request.
         
-        CRITERIA FOR VALIDITY:
-        - Must be a clear business proposition (Capital, Deals, Services, Jobs, Advice).
-        - REJECT: "I need coffee", "Can you hear me?", "I am here", "Interested", "Me too", "Sent DM", "Check email".
-        - REJECT: Vague statements without context ("I have one", "Yes please").
+        === VALID (Keep) ===
+        - Offers of capital, lending, services, deals, properties
+        - Looking for buyers, sellers, lenders, TCs, contractors
+        - "I have $500k to deploy", "Looking for SFH in Texas", "I'm a TC", "We fund deals"
+        
+        === INVALID (Reject) ===
+        - Personal comments, jokes, banter: "I asked to be sued", "BEING CORRECT", "haha", "lol"
+        - Vague or incomplete: "Interested", "Me too", "Yes", "No", "Agreed", "Same"
+        - Logistical: "Can you hear me?", "Check your email", "Sent DM", "Call me"
+        - Emojis only or emoji-heavy without business content
+        - Self-references without business value: "I'm here", "Hey everyone", "Good morning"
+        - Anything that does NOT offer or request a specific business service/product/deal
+        
+        === RULE ===
+        If you're unsure whether something is business-related, REJECT it. Be strict.
+        The description must contain a SPECIFIC service, product, deal, or professional offering.
         
         Items to Validate:
         {items_text}
