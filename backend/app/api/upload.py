@@ -164,7 +164,6 @@ async def process_extraction_background(chat_id: str, user_id: str, org_id: str,
 
 @router.post("/upload-meeting-chat", response_model=dict)
 async def upload_meeting_chat(
-    background_tasks: BackgroundTasks,
     meeting_name: Optional[str] = Form(None),
     file: UploadFile = File(...),
     client: Client = Depends(get_supabase_client),
@@ -172,6 +171,7 @@ async def upload_meeting_chat(
     admin_ctx: UserContext = Depends(require_admin), # Enforce Admin
     token_payload = Depends(security) # Need raw token for background task
 ):
+
     # 1. Read file
     try:
         content = await file.read()
@@ -207,9 +207,10 @@ async def upload_meeting_chat(
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to save meeting chat: {str(e)}")
 
-    # 5. Schedule Background Extraction
-    # We pass the raw token string
+    # 5. Schedule Background Extraction using asyncio.create_task
+    # More reliable than BackgroundTasks for async functions
+    import asyncio
     raw_token = token_payload.credentials
-    background_tasks.add_task(process_extraction_background, chat_id, user_id, org_id, cleaned_text, raw_token)
+    asyncio.create_task(process_extraction_background(chat_id, user_id, org_id, cleaned_text, raw_token))
 
     return {"status": "success", "id": chat_id, "message": "File uploaded. Extraction started in background."}
