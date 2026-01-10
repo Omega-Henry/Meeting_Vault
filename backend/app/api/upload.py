@@ -118,6 +118,19 @@ async def process_extraction_background(chat_id: str, user_id: str, org_id: str,
 
     except Exception as e:
         logger.error(f"Background Task Error for chat {chat_id}: {e}")
+        # Mark the chat as failed so it doesn't stay stuck on "Processing..."
+        try:
+            client: Client = create_client(settings.SUPABASE_URL, settings.SUPABASE_ANON_KEY)
+            client.auth.set_session(access_token=auth_token, refresh_token=auth_token)
+            client.table("meeting_chats").update({
+                "digest_bullets": {
+                    "summary": f"Extraction failed: {str(e)[:100]}. Please delete and re-upload.",
+                    "key_topics": []
+                }
+            }).eq("id", chat_id).execute()
+            logger.info(f"Marked chat {chat_id} as failed")
+        except Exception as update_err:
+            logger.error(f"Failed to mark chat as failed: {update_err}")
 
 @router.post("/upload-meeting-chat", response_model=dict)
 async def upload_meeting_chat(

@@ -117,9 +117,12 @@ def extract_hard_contact_info(messages: List[CleanedMessage]) -> Dict[str, Dict]
             
     return contacts_map
 
-def chunk_messages(messages: List[CleanedMessage], chunk_size: int = 200) -> List[List[CleanedMessage]]:
-    """Splits messages into chunks for parallel processing."""
+def chunk_messages(messages: List[CleanedMessage], chunk_size: int = 50) -> List[List[CleanedMessage]]:
+    """Splits messages into chunks for parallel processing. Smaller chunks = faster individual calls."""
     return [messages[i:i + chunk_size] for i in range(0, len(messages), chunk_size)]
+
+# LLM call timeout in seconds
+LLM_TIMEOUT_SECONDS = 60
 
 async def analyze_chunk(messages_chunk: List[CleanedMessage], chunk_index: int) -> IntentAnalysis:
     """Analyzes a single chunk of messages."""
@@ -295,23 +298,46 @@ async def extract_meeting_data(text: str) -> ExtractedMeetingData:
     # 3. LLM Intent Analysis (Parallel Chunks) + Summary
     logger.info("Starting Parallel LLM Tasks...")
     
-    # Chunking
-    chunks = chunk_messages(raw_messages, chunk_size=100) # 100 msg chunks
+    # Chunking - use smaller chunks configured above
+    chunks = chunk_messages(raw_messages)  # Uses default 50 msg chunks
     logger.info(f"Split transcript into {len(chunks)} chunks for parallel analysis.")
     
-    # Create semaphore to limit concurrency
-    sem = asyncio.Semaphore(5)
+    # Create semaphore to limit concurrency (increased for faster processing)
+    sem = asyncio.Semaphore(8)
 
     async def protected_analyze_chunk(chunk, i):
+        """Analyze chunk with timeout and semaphore protection."""
         async with sem:
-            return await analyze_chunk(chunk, i)
+            try:
+                return await asyncio.wait_for(
+                    analyze_chunk(chunk, i),
+                    timeout=LLM_TIMEOUT_SECONDS
+                )
+            except asyncio.TimeoutError:
+                logger.warning(f"Chunk {i} timed out after {LLM_TIMEOUT_SECONDS}s, skipping...")
+                return IntentAnalysis(services=[], noise_message_ids=[])
+            except Exception as e:
+                logger.error(f"Chunk {i} failed: {e}")
+                return IntentAnalysis(services=[], noise_message_ids=[])
 
     # Create tasks
     intent_tasks = [protected_analyze_chunk(chunk, i) for i, chunk in enumerate(chunks)]
-    summary_task = extract_summary_with_llm(text)
     
-    # Run all
-    results = await asyncio.gather(*intent_tasks, summary_task)
+    # Summary also gets a timeout
+    async def protected_summary():
+        try:
+            return await asyncio.wait_for(
+                extract_summary_with_llm(text),
+                timeout=LLM_TIMEOUT_SECONDS * 2  # Summary gets more time
+            )
+        except asyncio.TimeoutError:
+            logger.warning("Summary generation timed out")
+            return MeetingSummary(summary="Summary generation timed out.", key_topics=[])
+    
+    summary_task = protected_summary()
+    
+    # Run all in parallel
+    results = await asyncio.gather(*intent_tasks, summary_task, return_exceptions=True)
     
     # Separate results
     chunk_results = results[:-1]
