@@ -164,21 +164,27 @@ export default function AssistantPanel() {
                                     {msg.data.intent === 'list_services' && Array.isArray(msg.data.data) && (
                                         <div className="space-y-2">
                                             <p className="text-xs font-semibold opacity-70">Found {msg.data.count} services:</p>
-                                            <div className="max-h-60 overflow-y-auto space-y-2">
+                                            <div className="max-h-80 overflow-y-auto space-y-2">
                                                 {msg.data.data.map((service: any) => (
-                                                    <div key={service.id} className="text-xs bg-background/50 p-2 rounded border-l-2 border-primary group hover:bg-muted transition-colors">
-                                                        <div className="flex justify-between items-start gap-2">
-                                                            <span className={clsx("uppercase text-[10px] px-1 rounded shrink-0", service.type === 'offer' ? "bg-green-500/10 text-green-500" : "bg-blue-500/10 text-blue-500")}>
+                                                    <div key={service.id} className="text-xs bg-background/50 p-3 rounded border-l-2 border-primary group hover:bg-muted transition-colors">
+                                                        <div className="flex justify-between items-start gap-2 mb-2">
+                                                            <span className={clsx("uppercase text-[10px] px-1.5 py-0.5 rounded font-bold shrink-0", service.type === 'offer' ? "bg-green-500/20 text-green-500" : "bg-blue-500/20 text-blue-500")}>
                                                                 {service.type}
                                                             </span>
-                                                            <span className="text-[10px] opacity-50 truncate">{service.contacts?.name}</span>
+                                                            <a
+                                                                href={`/app/contacts/${service.contact_id || service.contacts?.id}`}
+                                                                className="text-[10px] text-primary hover:underline truncate"
+                                                                onClick={(e) => e.stopPropagation()}
+                                                            >
+                                                                {service.contacts?.name || 'Unknown'}
+                                                            </a>
                                                         </div>
                                                         {service.links && service.links.length > 0 ? (
-                                                            <a href={service.links[0]} target="_blank" rel="noopener noreferrer" className="mt-1 block hover:underline text-primary truncate">
+                                                            <a href={service.links[0]} target="_blank" rel="noopener noreferrer" className="block hover:underline text-primary">
                                                                 {service.description}
                                                             </a>
                                                         ) : (
-                                                            <div className="mt-1 truncate">{service.description}</div>
+                                                            <div className="text-foreground leading-relaxed">{service.description}</div>
                                                         )}
                                                     </div>
                                                 ))}
