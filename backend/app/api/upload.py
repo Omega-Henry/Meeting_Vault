@@ -13,23 +13,30 @@ import logging
 router = APIRouter()
 logger = logging.getLogger(__name__)
 
+# Maximum time for entire extraction (5 minutes for serverless compatibility)
+EXTRACTION_TIMEOUT_SECONDS = 300
+
 async def process_extraction_background(chat_id: str, user_id: str, org_id: str, cleaned_text: str, auth_token: str):
     """
     Background task to run the heavy AI extraction.
     Creates its own Supabase client to ensure thread/context safety.
+    Wrapped in global timeout for serverless reliability.
     """
+    import asyncio
     logger.info(f"Starting background extraction for chat {chat_id}")
     
+    # Create client early so we can mark as failed on any error
+    client: Client = create_client(settings.SUPABASE_URL, settings.SUPABASE_ANON_KEY)
+    client.auth.set_session(access_token=auth_token, refresh_token=auth_token)
+    
     try:
-        # Initialize Supabase Client for this task
-        # We use the anon key but set the user's auth token to respect RLS
-        client: Client = create_client(settings.SUPABASE_URL, settings.SUPABASE_ANON_KEY)
-        client.auth.set_session(access_token=auth_token, refresh_token=auth_token)
+        # Wrap entire extraction in global timeout
+        extracted_data = await asyncio.wait_for(
+            extract_meeting_data(cleaned_text),
+            timeout=EXTRACTION_TIMEOUT_SECONDS
+        )
         
-        # 1. Run Extraction (Async)
-        extracted_data = await extract_meeting_data(cleaned_text)
-        
-        # 2. Update Meeting Chat
+        # Update Meeting Chat
         logger.info(f"Updating meeting_chat {chat_id} with summary & cleaned transcript...")
         try:
              client.table("meeting_chats").update({
@@ -37,9 +44,8 @@ async def process_extraction_background(chat_id: str, user_id: str, org_id: str,
                 "cleaned_transcript": [m.model_dump() for m in extracted_data.cleaned_transcript]
             }).eq("id", chat_id).execute()
         except Exception as e:
-            # Pydantic/Supabase specific errors or Row-not-found if deleted
             logger.error(f"Failed to update meeting_chat {chat_id}: {e}")
-            return # Stop if we can't update the chat (likely deleted)
+            return
 
         # 3. Process Contacts & Services
         # Note: This logic duplicates the original sync logic but is now safe in background
@@ -131,12 +137,21 @@ async def process_extraction_background(chat_id: str, user_id: str, org_id: str,
         
         logger.info(f"Background extraction finished for {chat_id}")
 
+    except asyncio.TimeoutError:
+        logger.error(f"Extraction timed out for chat {chat_id} after {EXTRACTION_TIMEOUT_SECONDS}s")
+        try:
+            client.table("meeting_chats").update({
+                "digest_bullets": {
+                    "summary": "Extraction timed out. Chat may be too large. Try splitting into smaller parts.",
+                    "key_topics": []
+                }
+            }).eq("id", chat_id).execute()
+        except Exception as update_err:
+            logger.error(f"Failed to mark chat as timed out: {update_err}")
+
     except Exception as e:
         logger.error(f"Background Task Error for chat {chat_id}: {e}")
-        # Mark the chat as failed so it doesn't stay stuck on "Processing..."
         try:
-            client: Client = create_client(settings.SUPABASE_URL, settings.SUPABASE_ANON_KEY)
-            client.auth.set_session(access_token=auth_token, refresh_token=auth_token)
             client.table("meeting_chats").update({
                 "digest_bullets": {
                     "summary": f"Extraction failed: {str(e)[:100]}. Please delete and re-upload.",
