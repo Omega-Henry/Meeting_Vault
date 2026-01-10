@@ -10,11 +10,34 @@ create table if not exists public.feedback (
 
 alter table public.feedback enable row level security;
 
+-- Users can insert their own feedback
 create policy "Users can insert their own feedback"
 on public.feedback for insert
 with check (auth.uid() = user_id);
 
--- Admins (via service role or admin policy) need to view.
--- Assuming backend admin uses service role, so explicit policy might not be needed for admin *api*, 
--- but if we use frontend Supabase client for admins, we need a policy.
--- create policy "Admins can view all feedback" ... 
+-- Users can view their own feedback
+create policy "Users can view their own feedback"
+on public.feedback for select
+using (auth.uid() = user_id);
+
+-- Admins can view all feedback (check org_members for admin role)
+create policy "Admins can view all feedback"
+on public.feedback for select
+using (
+  exists (
+    select 1 from public.org_members
+    where org_members.user_id = auth.uid()
+    and org_members.role = 'admin'
+  )
+);
+
+-- Admins can update feedback status
+create policy "Admins can update feedback"
+on public.feedback for update
+using (
+  exists (
+    select 1 from public.org_members
+    where org_members.user_id = auth.uid()
+    and org_members.role = 'admin'
+  )
+);
