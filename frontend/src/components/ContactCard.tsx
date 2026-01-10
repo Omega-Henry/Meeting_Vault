@@ -124,10 +124,30 @@ export function ContactCard({ contact, onClick, compact = false }: ContactCardPr
                     </div>
                 )}
 
+                {/* Price Range */}
+                {(profile.min_target_price || profile.max_target_price) && !compact && (
+                    <div className="flex items-center gap-2 text-muted-foreground text-xs">
+                        <span className="font-medium text-foreground">💰 Range:</span>
+                        {profile.min_target_price && `$${(profile.min_target_price / 1000).toFixed(0)}k`}
+                        {profile.min_target_price && profile.max_target_price && ' - '}
+                        {profile.max_target_price && `$${(profile.max_target_price / 1000).toFixed(0)}k`}
+                        {provenance.min_target_price === 'ai_generated' && <Bot className="h-3 w-3 opacity-40" />}
+                    </div>
+                )}
+
                 {/* I can help with */}
                 {profile.i_can_help_with && !compact && (
                     <div className="pt-1 text-xs text-muted-foreground">
-                        <span className="font-medium text-foreground">Can help:</span> {profile.i_can_help_with.substring(0, 60)}...
+                        <span className="font-medium text-green-600">✓ Can help:</span> {profile.i_can_help_with.substring(0, 80)}{profile.i_can_help_with.length > 80 ? '...' : ''}
+                        {provenance.i_can_help_with === 'ai_generated' && <Bot className="h-3 w-3 opacity-40 inline ml-1" />}
+                    </div>
+                )}
+
+                {/* Help me with */}
+                {profile.help_me_with && !compact && (
+                    <div className="text-xs text-muted-foreground">
+                        <span className="font-medium text-blue-600">⟡ Looking for:</span> {profile.help_me_with.substring(0, 80)}{profile.help_me_with.length > 80 ? '...' : ''}
+                        {provenance.help_me_with === 'ai_generated' && <Bot className="h-3 w-3 opacity-40 inline ml-1" />}
                     </div>
                 )}
 

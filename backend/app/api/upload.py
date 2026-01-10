@@ -4,6 +4,7 @@ from supabase import Client, create_client
 from app.dependencies import get_supabase_client, get_user_context, security, UserContext, require_admin
 from app.services.ingestion import clean_text, compute_hash
 from app.services.hybrid_extraction import extract_meeting_data
+from app.services.profile_inference import update_contact_profile_from_services
 from app.core.config import settings
 from app.schemas import MeetingChatResponse
 import json
@@ -113,7 +114,21 @@ async def process_extraction_background(chat_id: str, user_id: str, org_id: str,
                 "links": service.links
             }
             client.table("services").insert(service_data).execute()
-            
+        
+        # 4. AI Profile Inference - Pre-fill profiles from services
+        logger.info("Starting AI profile inference...")
+        for contact_name, contact_id in contact_name_to_id.items():
+            if contact_name == "Unattributed":
+                continue
+            # Get this contact's services
+            contact_services = [
+                {"type": s.type, "description": s.description}
+                for s in extracted_data.services 
+                if s.contact_name == contact_name
+            ]
+            if contact_services:
+                await update_contact_profile_from_services(client, contact_id, contact_services)
+        
         logger.info(f"Background extraction finished for {chat_id}")
 
     except Exception as e:
