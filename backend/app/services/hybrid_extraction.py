@@ -58,6 +58,32 @@ def clean_description(text: str) -> str:
     text = re.sub(URL_REGEX, '', text)
     return text.strip()
 
+# Pre-filter: Skip messages that are obviously noise (saves LLM tokens and time)
+NOISE_PATTERNS = re.compile(r'^(less|nope|yes|no|me|same|mine|true|guilty|amen|love it|so true|heck yeah!?|agreed|yup|boom|facts|nice|exactly|this!?|wow|yesss+|nooo+|lol|haha|❤️|🔥|👍|👏|💯|😂|🤣|💪|😍|✌️|🐊|✌🏾|💛|🎉)$', re.IGNORECASE)
+MIN_MEANINGFUL_LENGTH = 15  # Skip very short messages (less likely to have business value)
+
+def is_obvious_noise(message: str) -> bool:
+    """Fast check to skip messages that are clearly noise without calling LLM."""
+    text = message.strip()
+    
+    # Skip very short messages
+    if len(text) < MIN_MEANINGFUL_LENGTH:
+        # Unless it contains phone/email/URL
+        if not re.search(PHONE_REGEX, text) and not re.search(EMAIL_REGEX, text) and not re.search(URL_REGEX, text):
+            return True
+    
+    # Skip common one-word responses
+    if NOISE_PATTERNS.match(text):
+        return True
+    
+    # Skip emoji-only messages
+    import emoji
+    stripped = emoji.replace_emoji(text, replace='').strip()
+    if not stripped:
+        return True
+    
+    return False
+
 def parse_transcript_lines(text: str) -> List[CleanedMessage]:
     """Parses raw text into structured messages. Handles multi-line messages."""
     lines = text.split('\n')
@@ -217,28 +243,32 @@ async def validate_services(services: List[ExtractedService]) -> List[ExtractedS
         items_text = "\n".join([f"{i}. [{s.type.upper()}] {s.description}" for i, s in enumerate(services)])
         
         prompt = f"""
-        You are a Quality Control Validator for a Real Estate & Creative Finance Business Database.
-        Your job is to keep REAL business offers/requests and reject noise.
+        You are a Quality Control Validator for a Real Estate & Creative Finance Database.
+        Your job is to keep REAL business offers/requests and REJECT noise/spam.
         
-        === VALID (Keep) ===
-        - Offers: "I have capital", "We fund deals", "I'm a lender", "I can help with...", "I'm a buyer in TX"
-        - Requests: "Looking for buyers", "Need a TC", "Who has deals in FL?", "I need funding"
-        - Deals: "I have a property in...", "Got a wholesale deal", "Looking for $500k deals"
-        - Services: "I'm a transaction coordinator", "We handle closings", "I do title work"
+        === VALID (Keep) - Real business value ===
+        - TC Offers: "I'm a Top Tier Transaction Coordinator", "Let our team make sure you make it to closing"
+        - Lender Offers: "I can fund your deals with hard money and DSCR loans", "I have capital to deploy"
+        - Buyer Offers: "We are buying in Atlanta", "Looking for deals under $500k", "Nashville seller, who wants it, SFH?"
+        - Service Offers: "Bird dog service: off-market outreach → qualified lead", "I do title work"
+        - Specific Requests: "I am looking for a TC to join my team in Idaho", "Need a lender for a $200k deal"
+        - Deal Posts: "I have a lead in Rock Springs Wyoming that really wants to sell"
         
-        === INVALID (Reject) - Be strict on these ===
-        - Networking intent: "would like to connect", "sent you my blinq", "just shared my blinq", "let's connect"
-        - General questions (not seeking a service): "What is owners club?", "How do you feel about...?"
-        - Opinions/discussions: "I think...", "In my experience...", "That's interesting"
-        - Vague interest: "Interested", "Me too", "Count me in", "Same here"
-        - Logistics: "Can you hear me?", "Link is broken", "Check your DM"
-        - Social: "Good morning", "Hey everyone", "Happy Friday", emojis only
+        === INVALID (Reject) - Common noise patterns ===
+        - One-word responses: "Less", "Nope", "Yes", "Guilty", "Same", "Mine", "True", "Me", "No"
+        - Poll responses: "1", "2", "3" (answering polls without business context)
+        - Social chatter: "Good morning", "Happy Saturday", "Love this", "So true", "Heck yeah!"
+        - Blinq-only: "https://blinq.me/..." without any offer/request context
+        - Reactions/agreements: "🔥", "❤️", "Me too", "Count me in", "Amen"
+        - Vague connection requests: "would like to connect", "let's connect", "sent you my blinq" (without business context)
+        - Off-topic discussion: Marriage advice, jokes, personal comments, logistics
+        - Duplicate spam: Same message posted 3+ times by same person (keep only first)
         
         === GRAY AREA (Use judgment) ===
-        - "I'd like to learn more about X" → REJECT (not a business request)
-        - "Anyone doing X? I want to get into it" → REJECT (learning, not transacting)
-        - "Who can help me with closing a deal?" → KEEP (seeking service)
-        - "I need a lender for a $200k deal" → KEEP (specific need)
+        - "Let's connect [blinq link]" after stating a service → KEEP (the service is the value)
+        - "Happy to help! [blinq]" without specifics → REJECT (too vague)
+        - "I'm a buyer in TX, let's connect" → KEEP (buyer offer with location)
+        - "Anyone doing wholesaling?" → REJECT (learning question, not deal request)
         
         Items to Validate:
         {items_text}
