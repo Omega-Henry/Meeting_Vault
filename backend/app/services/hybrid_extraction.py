@@ -217,25 +217,28 @@ async def validate_services(services: List[ExtractedService]) -> List[ExtractedS
         items_text = "\n".join([f"{i}. [{s.type.upper()}] {s.description}" for i, s in enumerate(services)])
         
         prompt = f"""
-        You are a STRICT Quality Control Validator for a Real Estate & Creative Finance Business Database.
-        Your job is to REJECT anything that is NOT a clear, actionable business offer or request.
+        You are a Quality Control Validator for a Real Estate & Creative Finance Business Database.
+        Your job is to keep REAL business offers/requests and reject noise.
         
         === VALID (Keep) ===
-        - Offers of capital, lending, services, deals, properties
-        - Looking for buyers, sellers, lenders, TCs, contractors
-        - "I have $500k to deploy", "Looking for SFH in Texas", "I'm a TC", "We fund deals"
+        - Offers: "I have capital", "We fund deals", "I'm a lender", "I can help with...", "I'm a buyer in TX"
+        - Requests: "Looking for buyers", "Need a TC", "Who has deals in FL?", "I need funding"
+        - Deals: "I have a property in...", "Got a wholesale deal", "Looking for $500k deals"
+        - Services: "I'm a transaction coordinator", "We handle closings", "I do title work"
         
-        === INVALID (Reject) ===
-        - Personal comments, jokes, banter: "I asked to be sued", "BEING CORRECT", "haha", "lol"
-        - Vague or incomplete: "Interested", "Me too", "Yes", "No", "Agreed", "Same"
-        - Logistical: "Can you hear me?", "Check your email", "Sent DM", "Call me"
-        - Emojis only or emoji-heavy without business content
-        - Self-references without business value: "I'm here", "Hey everyone", "Good morning"
-        - Anything that does NOT offer or request a specific business service/product/deal
+        === INVALID (Reject) - Be strict on these ===
+        - Networking intent: "would like to connect", "sent you my blinq", "just shared my blinq", "let's connect"
+        - General questions (not seeking a service): "What is owners club?", "How do you feel about...?"
+        - Opinions/discussions: "I think...", "In my experience...", "That's interesting"
+        - Vague interest: "Interested", "Me too", "Count me in", "Same here"
+        - Logistics: "Can you hear me?", "Link is broken", "Check your DM"
+        - Social: "Good morning", "Hey everyone", "Happy Friday", emojis only
         
-        === RULE ===
-        If you're unsure whether something is business-related, REJECT it. Be strict.
-        The description must contain a SPECIFIC service, product, deal, or professional offering.
+        === GRAY AREA (Use judgment) ===
+        - "I'd like to learn more about X" → REJECT (not a business request)
+        - "Anyone doing X? I want to get into it" → REJECT (learning, not transacting)
+        - "Who can help me with closing a deal?" → KEEP (seeking service)
+        - "I need a lender for a $200k deal" → KEEP (specific need)
         
         Items to Validate:
         {items_text}
