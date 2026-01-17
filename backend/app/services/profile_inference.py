@@ -225,7 +225,7 @@ def infer_profile_from_services(services: List[Dict[str, Any]], contact_name: st
     return profile_update
 
 
-async def update_contact_profile_from_services(client, contact_id: str, services: List[Dict], extracted_roles: List[str] = None) -> bool:
+def update_contact_profile_from_services(client, contact_id: str, services: List[Dict], extracted_roles: List[str] = None) -> bool:
     """
     Updates a contact's profile with AI-inferred data from their services AND explicit roles.
     Only updates fields that are currently empty and marks them as ai_generated.

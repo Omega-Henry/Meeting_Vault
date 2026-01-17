@@ -37,110 +37,109 @@ async def process_extraction_background(chat_id: str, user_id: str, org_id: str,
             timeout=EXTRACTION_TIMEOUT_SECONDS
         )
         
-        # Update Meeting Chat
-        logger.info(f"Updating meeting_chat {chat_id} with summary & cleaned transcript...")
-        try:
-             client.table("meeting_chats").update({
-                "digest_bullets": extracted_data.summary.model_dump(),
-                "cleaned_transcript": [m.model_dump() for m in extracted_data.cleaned_transcript]
-            }).eq("id", chat_id).execute()
-        except Exception as e:
-            logger.error(f"Failed to update meeting_chat {chat_id}: {e}")
-            return
+        # Update Meeting Chat (Sync wrapper for blocking DB calls)
+        def save_results_sync():
+            logger.info(f"Saving results for chat {chat_id} (Sync DB ops)...")
+            try:
+                client.table("meeting_chats").update({
+                    "digest_bullets": extracted_data.summary.model_dump(),
+                    "cleaned_transcript": [m.model_dump() for m in extracted_data.cleaned_transcript]
+                }).eq("id", chat_id).execute()
+            except Exception as e:
+                logger.error(f"Failed to update meeting_chat {chat_id}: {e}")
+                raise e
 
-        # 3. Process Contacts & Services
-        # Note: This logic duplicates the original sync logic but is now safe in background
-        contact_name_to_id = {}
-        
-        for contact in extracted_data.contacts:
-            contact_id = None
+            # 3. Process Contacts & Services
+            contact_name_to_id = {}
             
-            # Check existence by Email
-            if contact.email:
-                res = client.table("contacts").select("id").eq("org_id", org_id).eq("email", contact.email).execute()
-                if res.data:
-                    contact_id = res.data[0]["id"]
-            
-            # Check by Name
-            if not contact_id:
-                res = client.table("contacts").select("id").eq("org_id", org_id).eq("name", contact.name).execute()
-                if res.data:
-                    contact_id = res.data[0]["id"]
-            
-            # Check by Phone
-            if not contact_id and contact.phone:
-                res = client.table("contacts").select("id").eq("org_id", org_id).eq("phone", contact.phone).execute()
-                if res.data:
-                    contact_id = res.data[0]["id"]
-            
-            # Create if new
-            if not contact_id:
-                new_contact = {
-                    "user_id": user_id,
-                    "org_id": org_id,
-                    "name": contact.name,
-                    "email": contact.email,
-                    "phone": contact.phone
-                }
-                res = client.table("contacts").insert(new_contact).execute()
-                contact_id = res.data[0]["id"]
-            
-            contact_name_to_id[contact.name] = contact_id
-
-        # Insert Services (with deduplication check)
-        for service in extracted_data.services:
-            contact_id = contact_name_to_id.get(service.contact_name)
-            
-            # Fallback for unattributed/hallucinated names
-            if not contact_id:
-                unattributed_res = client.table("contacts").select("id").eq("org_id", org_id).eq("name", "Unattributed").execute()
-                if unattributed_res.data:
-                    contact_id = unattributed_res.data[0]["id"]
-                else:
-                    res = client.table("contacts").insert({
-                        "user_id": user_id, 
+            for contact in extracted_data.contacts:
+                contact_id = None
+                
+                # Check existence by Email
+                if contact.email:
+                    res = client.table("contacts").select("id").eq("org_id", org_id).eq("email", contact.email).execute()
+                    if res.data:
+                        contact_id = res.data[0]["id"]
+                
+                # Check by Name
+                if not contact_id:
+                    res = client.table("contacts").select("id").eq("org_id", org_id).eq("name", contact.name).execute()
+                    if res.data:
+                        contact_id = res.data[0]["id"]
+                
+                # Check by Phone
+                if not contact_id and contact.phone:
+                    res = client.table("contacts").select("id").eq("org_id", org_id).eq("phone", contact.phone).execute()
+                    if res.data:
+                        contact_id = res.data[0]["id"]
+                
+                # Create if new
+                if not contact_id:
+                    new_contact = {
+                        "user_id": user_id,
                         "org_id": org_id,
-                        "name": "Unattributed"
-                    }).execute()
+                        "name": contact.name,
+                        "email": contact.email,
+                        "phone": contact.phone
+                    }
+                    res = client.table("contacts").insert(new_contact).execute()
                     contact_id = res.data[0]["id"]
+                
+                contact_name_to_id[contact.name] = contact_id
 
-            # Deduplication: Check if similar service already exists
-            existing_service = client.table("services").select("id").eq("contact_id", contact_id).eq("type", service.type).ilike("description", service.description[:50] + "%").execute()
-            
-            if existing_service.data:
-                logger.info(f"Skipping duplicate service: {service.description[:50]}...")
-                continue
+            # Insert Services
+            for service in extracted_data.services:
+                contact_id = contact_name_to_id.get(service.contact_name)
+                
+                # Fallback for unattributed/hallucinated names
+                if not contact_id:
+                    unattributed_res = client.table("contacts").select("id").eq("org_id", org_id).eq("name", "Unattributed").execute()
+                    if unattributed_res.data:
+                        contact_id = unattributed_res.data[0]["id"]
+                    else:
+                        res = client.table("contacts").insert({
+                            "user_id": user_id, 
+                            "org_id": org_id,
+                            "name": "Unattributed"
+                        }).execute()
+                        contact_id = res.data[0]["id"]
 
-            service_data = {
-                "user_id": user_id,
-                "contact_id": contact_id,
-                "org_id": org_id,
-                "meeting_chat_id": chat_id,
-                "type": service.type,
-                "description": service.description,
-                "links": service.links
-            }
-            client.table("services").insert(service_data).execute()
-        
-        # 4. AI Profile Inference - Pre-fill profiles from services
-        logger.info("Starting AI profile inference...")
-        for contact_name, contact_id in contact_name_to_id.items():
-            if contact_name == "Unattributed":
-                continue
-            # Get this contact's services
-            contact_services = [
-                {"type": s.type, "description": s.description}
-                for s in extracted_data.services 
-                if s.contact_name == contact_name
-            ]
-            # Get roles from the contact data (e.g. "Gator Lender, Subto Student")
-            contact_roles = []
-            for c in extracted_data.contacts:
-                if c.name == contact_name and c.role:
-                     contact_roles = [r.strip() for r in c.role.split(',')]
+                # Deduplication
+                existing_service = client.table("services").select("id").eq("contact_id", contact_id).eq("type", service.type).ilike("description", service.description[:50] + "%").execute()
+                
+                if existing_service.data:
+                    continue
+
+                service_data = {
+                    "user_id": user_id,
+                    "contact_id": contact_id,
+                    "org_id": org_id,
+                    "meeting_chat_id": chat_id,
+                    "type": service.type,
+                    "description": service.description,
+                    "links": service.links
+                }
+                client.table("services").insert(service_data).execute()
             
-            if contact_services or contact_roles:
-                await update_contact_profile_from_services(client, contact_id, contact_services, contact_roles)
+            # 4. AI Profile Inference (Run blocking sync updates)
+            logger.info("Starting AI profile inference...")
+            for contact_name, contact_id in contact_name_to_id.items():
+                if contact_name == "Unattributed":
+                    continue
+                # Get this contact's services
+                contact_services = [
+                    {"type": s.type, "description": s.description}
+                    for s in extracted_data.services 
+                    if s.contact_name == contact_name
+                ]
+                # Get roles from the contact data (e.g. "Gator Lender, Subto Student")
+                contact_roles = []
+                for c in extracted_data.contacts:
+                    if c.name == contact_name and c.role:
+                         contact_roles = [r.strip() for r in c.role.split(',')]
+                
+                if contact_services or contact_roles:
+                    update_contact_profile_from_services(client, contact_id, contact_services, contact_roles)
         
         logger.info(f"Background extraction finished for {chat_id}")
 
