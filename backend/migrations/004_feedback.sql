@@ -25,9 +25,9 @@ create policy "Admins can view all feedback"
 on public.feedback for select
 using (
   exists (
-    select 1 from public.org_members
-    where org_members.user_id = auth.uid()
-    and org_members.role = 'admin'
+    select 1 from public.memberships
+    where memberships.user_id = auth.uid()
+    and memberships.role = 'admin'
   )
 );
 
@@ -36,8 +36,8 @@ create policy "Admins can update feedback"
 on public.feedback for update
 using (
   exists (
-    select 1 from public.org_members
-    where org_members.user_id = auth.uid()
-    and org_members.role = 'admin'
+    select 1 from public.memberships
+    where memberships.user_id = auth.uid()
+    and memberships.role = 'admin'
   )
 );

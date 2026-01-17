@@ -20,15 +20,24 @@ class ContactProfileBase(BaseModel):
     blinq: Optional[str] = None
     website: Optional[str] = None
     communities: List[str] = []
-    markets: List[str] = []  # e.g. ["MO", "TX", "Nationwide"]
+    social_media: Dict[str, str] = {}
+    
+    # Structured Data
+    role_tags: List[str] = []
+    asset_classes: List[str] = []
+    markets: List[str] = []
     min_target_price: Optional[float] = None
     max_target_price: Optional[float] = None
-    limits: Dict[str, Any] = {}  # Interest rate, ownership %, etc.
+    
+    # "The Card" Text Fields
     i_can_help_with: Optional[str] = None
     help_me_with: Optional[str] = None
-    hot_plate: Optional[str] = None  # Currently working on
+    hot_plate: Optional[str] = None
     message_to_world: Optional[str] = None
-    role_tags: List[str] = []  # e.g. ["tc", "gator", "subto"]
+    
+    # The Buy Box (Queryable)
+    buy_box: Dict[str, Any] = {}
+    
     completeness_score: int = 0
 
 class ContactBase(BaseModel):

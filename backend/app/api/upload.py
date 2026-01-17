@@ -3,7 +3,7 @@ from typing import Optional
 from supabase import Client, create_client
 from app.dependencies import get_supabase_client, get_user_context, security, UserContext, require_admin
 from app.services.ingestion import clean_text, compute_hash
-from app.services.hybrid_extraction import extract_meeting_data
+from app.services.extraction_graph import run_extraction_pipeline
 from app.services.profile_inference import update_contact_profile_from_services
 from app.core.config import settings
 from app.schemas import MeetingChatResponse
@@ -31,8 +31,9 @@ async def process_extraction_background(chat_id: str, user_id: str, org_id: str,
     
     try:
         # Wrap entire extraction in global timeout
+        # Using the new LangGraph pipeline
         extracted_data = await asyncio.wait_for(
-            extract_meeting_data(cleaned_text),
+            run_extraction_pipeline(cleaned_text),
             timeout=EXTRACTION_TIMEOUT_SECONDS
         )
         
@@ -132,8 +133,14 @@ async def process_extraction_background(chat_id: str, user_id: str, org_id: str,
                 for s in extracted_data.services 
                 if s.contact_name == contact_name
             ]
-            if contact_services:
-                await update_contact_profile_from_services(client, contact_id, contact_services)
+            # Get roles from the contact data (e.g. "Gator Lender, Subto Student")
+            contact_roles = []
+            for c in extracted_data.contacts:
+                if c.name == contact_name and c.role:
+                     contact_roles = [r.strip() for r in c.role.split(',')]
+            
+            if contact_services or contact_roles:
+                await update_contact_profile_from_services(client, contact_id, contact_services, contact_roles)
         
         logger.info(f"Background extraction finished for {chat_id}")
 
@@ -164,6 +171,7 @@ async def process_extraction_background(chat_id: str, user_id: str, org_id: str,
 
 @router.post("/upload-meeting-chat", response_model=dict)
 async def upload_meeting_chat(
+    background_tasks: BackgroundTasks,
     meeting_name: Optional[str] = Form(None),
     file: UploadFile = File(...),
     client: Client = Depends(get_supabase_client),
@@ -207,10 +215,9 @@ async def upload_meeting_chat(
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to save meeting chat: {str(e)}")
 
-    # 5. Schedule Background Extraction using asyncio.create_task
-    # More reliable than BackgroundTasks for async functions
-    import asyncio
+    # 5. Schedule Background Extraction using FastAPI BackgroundTasks
+    # This is standard and reliable for FastAPI apps
     raw_token = token_payload.credentials
-    asyncio.create_task(process_extraction_background(chat_id, user_id, org_id, cleaned_text, raw_token))
+    background_tasks.add_task(process_extraction_background, chat_id, user_id, org_id, cleaned_text, raw_token)
 
     return {"status": "success", "id": chat_id, "message": "File uploaded. Extraction started in background."}

@@ -118,9 +118,13 @@ def extract_prices(text: str) -> Dict[str, Optional[float]]:
         'max': max(prices) if prices else None
     }
 
-def infer_profile_from_services(services: List[Dict[str, Any]], contact_name: str) -> Dict[str, Any]:
+    # Build profile update
+    profile_update = {}
+    field_provenance = {}
+
+def infer_profile_from_services(services: List[Dict[str, Any]], contact_name: str, extracted_roles: List[str] = None) -> Dict[str, Any]:
     """
-    Infer profile fields from a contact's services.
+    Infer profile fields from a contact's services AND explicitly extracted roles.
     Returns a dict of inferred profile fields ready for database update.
     """
     # Combine all service descriptions for this contact
@@ -136,30 +140,54 @@ def infer_profile_from_services(services: List[Dict[str, Any]], contact_name: st
         else:
             requests.append(desc)
     
-    combined_text = ' '.join(all_descriptions)
-    
     # Extract fields
     role_tags = extract_role_tags(combined_text)
+    
+    # Merge explicit extracted roles (e.g. from Emojis/Regex)
+    if extracted_roles:
+        # Normalize and dedup
+        role_tags.extend([r for r in extracted_roles if r not in role_tags])
+        
     assets = extract_asset_classes(combined_text)
     markets = extract_markets(combined_text)
     prices = extract_prices(combined_text)
     
+    # Extract "Hot Plate" (simple heuristic)
+    hot_plate = None
+    hot_plate_match = re.search(r'(currently working on|looking for|active in)\s+([^.\n]+)', combined_text, re.IGNORECASE)
+    if hot_plate_match:
+        hot_plate = hot_plate_match.group(2).strip()
+    
+    # Build structured Buy Box
+    # Only if we have some investment criteria
+    buy_box = {}
+    if assets or markets or prices['min'] or prices['max'] or 'investor' in role_tags or 'buyer' in role_tags:
+        buy_box = {
+             "assets": assets,
+             "markets": markets,
+             "min_price": prices['min'],
+             "max_price": prices['max'],
+             "strategy": [r for r in role_tags if r in ['subto', 'gator', 'wholesaler']]
+        }
+
     # Build profile update
     profile_update = {}
     field_provenance = {}
+    
+    # --- Populating Fields ---
     
     if role_tags:
         profile_update['role_tags'] = role_tags
         field_provenance['role_tags'] = 'ai_generated'
     
     if assets:
-        profile_update['assets'] = assets
-        field_provenance['assets'] = 'ai_generated'
+        profile_update['asset_classes'] = assets
+        field_provenance['asset_classes'] = 'ai_generated'
     
     if markets:
         profile_update['markets'] = markets
         field_provenance['markets'] = 'ai_generated'
-    
+        
     if prices['min']:
         profile_update['min_target_price'] = prices['min']
         field_provenance['min_target_price'] = 'ai_generated'
@@ -167,6 +195,14 @@ def infer_profile_from_services(services: List[Dict[str, Any]], contact_name: st
     if prices['max']:
         profile_update['max_target_price'] = prices['max']
         field_provenance['max_target_price'] = 'ai_generated'
+        
+    if buy_box:
+        profile_update['buy_box'] = buy_box
+        field_provenance['buy_box'] = 'ai_generated'
+        
+    if hot_plate:
+        profile_update['hot_plate'] = hot_plate
+        field_provenance['hot_plate'] = 'ai_generated'
     
     # Build "I can help with" from offers
     if offers:
@@ -189,12 +225,12 @@ def infer_profile_from_services(services: List[Dict[str, Any]], contact_name: st
     return profile_update
 
 
-async def update_contact_profile_from_services(client, contact_id: str, services: List[Dict]) -> bool:
+async def update_contact_profile_from_services(client, contact_id: str, services: List[Dict], extracted_roles: List[str] = None) -> bool:
     """
-    Updates a contact's profile with AI-inferred data from their services.
+    Updates a contact's profile with AI-inferred data from their services AND explicit roles.
     Only updates fields that are currently empty and marks them as ai_generated.
     """
-    if not services:
+    if not services and not extracted_roles:
         return False
     
     try:
@@ -205,7 +241,7 @@ async def update_contact_profile_from_services(client, contact_id: str, services
         contact_name = contact_res.data[0].get('name', 'Unknown')
         
         # Infer profile
-        inferred = infer_profile_from_services(services, contact_name)
+        inferred = infer_profile_from_services(services, contact_name, extracted_roles)
         if not inferred or len(inferred) <= 1:  # Only has field_provenance
             return False
         

@@ -105,9 +105,8 @@ ALL_TOOLS = [list_chats_tool, get_chat_tool, search_contacts_tool, list_services
 # Nodes
 
 def intent_router(state: AgentState):
-    # Simple router based on last message
-    # In a real app, we might use an LLM call here to classify intent
-    # For MVP, we'll just let the Planner (LLM with tools) decide.
+    # Router to determine initial intent. 
+    # Currently defaults to 'general' to let the Planner decide tool usage.
     return {"intent": "general"}
 
 
@@ -290,14 +289,9 @@ workflow.add_node("formatter", formatter_node)
 workflow.set_entry_point("intent_router")
 workflow.add_edge("intent_router", "planner")
 workflow.add_conditional_edges("planner", should_continue)
-workflow.add_edge("executor", "planner") # Loop back to planner to see if more tools needed (ReAct)
-# Actually, for read-only retrieval, usually one hop is enough, but ReAct is safer.
-# But to avoid infinite loops in MVP, let's go executor -> formatter for now, or check depth.
-# Let's do executor -> formatter for simplicity in this MVP unless we need multi-step.
-# The prompt says "Planner (choose tools) -> Executor (run tools) -> Formatter".
-# So:
-# Planner -> (has tools) -> Executor -> Formatter
-# Planner -> (no tools) -> Formatter
+workflow.add_edge("executor", "planner") # ReAct loop: Planner -> Executor -> Planner
+# To ensure stability and avoid infinite loops, we can also enforce a max depth or strict flow.
+# For this implementation, we allow the planner to decide if it needs to run more tools or exit.
 
 workflow.add_edge("executor", "formatter") 
 workflow.add_edge("formatter", END)

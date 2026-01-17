@@ -93,3 +93,63 @@ alter table public.services enable row level security;
 create policy "Users can only access their own services"
 on public.services for all
 using (auth.uid() = user_id);
+
+-- 5. contact_profiles
+create table public.contact_profiles (
+  id uuid primary key default gen_random_uuid(),
+  contact_id uuid not null references public.contacts(id) on delete cascade,
+  
+  -- Core Contact Fields (Extensions)
+  blinq text null,
+  website text null,
+  cell_phone text null,
+  office_phone text null,
+  
+  -- Rich Profile Fields
+  bio text null,
+  avatar_url text null,
+  social_media jsonb null default '{}'::jsonb, -- {platform: url}
+  communities text[] null default '{}',
+  role_tags text[] null default '{}',
+  
+  -- Business Logic
+  hot_plate text null, -- "What I'm currently working on"
+  i_can_help_with text null,
+  help_me_with text null,
+  message_to_world text null,
+  
+  -- Structured Data (Indexing)
+  asset_classes text[] null default '{}',
+  markets text[] null default '{}', -- States or Regions
+  min_target_price numeric null,
+  max_target_price numeric null,
+  
+  -- The Buy Box (Searchable)
+  -- Structure: { assets: [], markets: [], min_price: number, max_price: number, strategy: [], limits: {} }
+  buy_box jsonb null default '{}'::jsonb,
+  
+  -- Provenance tracking for AI/User edits
+  -- Structure: { "field_name": "ai_generated" | "user_verified" }
+  field_provenance jsonb null default '{}'::jsonb,
+  
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+-- Unique constraint: One profile per contact
+create unique index idx_contact_profiles_contact_id on public.contact_profiles (contact_id);
+
+-- GIN Index for fast Buy Box searching
+create index idx_contact_profiles_buy_box on public.contact_profiles using gin (buy_box);
+
+-- RLS for contact_profiles
+alter table public.contact_profiles enable row level security;
+
+-- Add user_id for RLS ownership
+alter table public.contact_profiles add column user_id uuid not null references auth.users(id);
+
+create policy "Users can only access their own contact profiles"
+on public.contact_profiles for all
+using (auth.uid() = user_id);
+
+create index idx_contact_profiles_user_id on public.contact_profiles (user_id);

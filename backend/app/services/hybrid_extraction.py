@@ -53,36 +53,35 @@ URL_REGEX = r'(https?://[^\s]+)'
 # Group 3: Message Content
 ZOOM_MSG_PATTERN = re.compile(r'((?:\d{4}-\d{2}-\d{2}\s+)?\d{1,2}:\d{2}(?::\d{2})?)\s+From\s+(.+?)\s+to\s+Everyone:\s*(.*)', re.IGNORECASE)
 
-def clean_description(text: str) -> str:
-    """Removes URLs and extra whitespace."""
-    text = re.sub(URL_REGEX, '', text)
-    return text.strip()
 
-# Pre-filter: Skip messages that are obviously noise (saves LLM tokens and time)
-NOISE_PATTERNS = re.compile(r'^(less|nope|yes|no|me|same|mine|true|guilty|amen|love it|so true|heck yeah!?|agreed|yup|boom|facts|nice|exactly|this!?|wow|yesss+|nooo+|lol|haha|❤️|🔥|👍|👏|💯|😂|🤣|💪|😍|✌️|🐊|✌🏾|💛|🎉)$', re.IGNORECASE)
-MIN_MEANINGFUL_LENGTH = 15  # Skip very short messages (less likely to have business value)
 
-def is_obvious_noise(message: str) -> bool:
-    """Fast check to skip messages that are clearly noise without calling LLM."""
-    text = message.strip()
-    
-    # Skip very short messages
-    if len(text) < MIN_MEANINGFUL_LENGTH:
-        # Unless it contains phone/email/URL
-        if not re.search(PHONE_REGEX, text) and not re.search(EMAIL_REGEX, text) and not re.search(URL_REGEX, text):
-            return True
-    
-    # Skip common one-word responses
-    if NOISE_PATTERNS.match(text):
-        return True
-    
-    # Skip emoji-only messages
-    import emoji
-    stripped = emoji.replace_emoji(text, replace='').strip()
-    if not stripped:
-        return True
-    
-    return False
+# Role Identifiers Map
+ROLES_MAP = {
+    "TC": "Transaction Coordinator",
+    "TTTC": "Top Tier Transaction Coordinator",
+    "TTC": "Transaction Coordinator",
+    "Gator": "Gator Lender",
+    "🐊": "Gator Lender",
+    "Subto": "Subto Student",
+    "✌️": "Subto Student",
+    "✌🏼": "Subto Student",
+    "✌🏽": "Subto Student",
+    "✌🏾": "Subto Student",
+    "✌": "Subto Student",
+    "OC": "Owners Club",
+    "Bird Dog": "Bird Dog",
+    "BirdDog": "Bird Dog",
+    "🐕": "Bird Dog",
+    "🐶": "Bird Dog",
+    "🐦": "Bird Dog",
+    "DTS": "Direct To Seller",
+    "DTA": "Direct To Agent",
+    "ZD": "Zero Down Business",
+    "ZDB": "Zero Down Business",
+    "Zero Down": "Zero Down Business"
+}
+
+
 
 def parse_transcript_lines(text: str) -> List[CleanedMessage]:
     """Parses raw text into structured messages. Handles multi-line messages."""
@@ -116,23 +115,54 @@ def parse_transcript_lines(text: str) -> List[CleanedMessage]:
         
     return parsed
 
+def extract_roles(text: str) -> List[str]:
+    """Extracts known roles from text using emoji/keyword mapping."""
+    found_roles = set()
+    for marker, role_name in ROLES_MAP.items():
+        if marker in text or marker.lower() in text.lower():
+            # Basic check, can be improved with regex strict word boundary for text terms
+            # For specific short acronyms like TC/OC/ZD be careful of substrings
+            # Emojis are safe.
+            if len(marker) > 2 and marker.isascii() and marker.isalpha():
+                 # Word boundary check for text codes
+                 if re.search(r'\b' + re.escape(marker) + r'\b', text, re.IGNORECASE):
+                     found_roles.add(role_name)
+            else:
+                 # Symbols or short codes, strict check or loose?
+                 # Emojis just loose check
+                 if not marker.isascii():
+                     if marker in text:
+                         found_roles.add(role_name)
+                 else:
+                     # Short ASCII codes like TC, OC
+                     if re.search(r'\b' + re.escape(marker) + r'\b', text): # Case sensitive for TC? Or ignore case?
+                         found_roles.add(role_name)
+    return list(found_roles)
+
 def extract_hard_contact_info(messages: List[CleanedMessage]) -> Dict[str, Dict]:
-    """Pass 1: Regex extraction of Phone, Email, Links from structured messages."""
-    contacts_map: Dict[str, Dict] = {} # Name -> {email, phone, links}
+    """Pass 1: Regex extraction of Phone, Email, Links AND Roles from structured messages."""
+    contacts_map: Dict[str, Dict] = {} # Name -> {email, phone, links, roles}
 
     for m in messages:
         sender = m.sender
         text = m.message
         
         if sender not in contacts_map:
-            contacts_map[sender] = {"email": None, "phone": None, "links": set()}
+            contacts_map[sender] = {"email": None, "phone": None, "links": set(), "roles": set()}
 
-        # Check combined text (Name + Message)
+        # Check combined text (Name + Message) for contacts AND roles
         combined = f"{sender} {text}"
         
         phones = re.findall(PHONE_REGEX, combined)
         emails = re.findall(EMAIL_REGEX, combined)
         urls = re.findall(URL_REGEX, combined)
+        
+        # Extract roles from sender name AND message
+        roles_in_sender = extract_roles(sender)
+        roles_in_msg = extract_roles(text)
+        
+        contacts_map[sender]["roles"].update(roles_in_sender)
+        contacts_map[sender]["roles"].update(roles_in_msg)
 
         if phones and not contacts_map[sender]["phone"]:
             contacts_map[sender]["phone"] = phones[0]
@@ -143,9 +173,7 @@ def extract_hard_contact_info(messages: List[CleanedMessage]) -> Dict[str, Dict]
             
     return contacts_map
 
-def chunk_messages(messages: List[CleanedMessage], chunk_size: int = 50) -> List[List[CleanedMessage]]:
-    """Splits messages into chunks for parallel processing. Smaller chunks = faster individual calls."""
-    return [messages[i:i + chunk_size] for i in range(0, len(messages), chunk_size)]
+# chunk_messages removed, handled by graph node now
 
 # LLM call timeout in seconds
 LLM_TIMEOUT_SECONDS = 60
@@ -197,11 +225,23 @@ async def analyze_chunk(messages_chunk: List[CleanedMessage], chunk_index: int) 
         # Task
         Analyze the refined transcript chunk below.
         1. Identify EVERY message that is a clear Business Offer or Request.
-        2. Identify EVERY message ID that is Noise (jokes, greetings, irrelevant chatter).
+        2. Identify EVERY message ID that is Noise (jokes, greetings, irrelevant chatter, poll responses).
         3. For valid Offers/Requests, extract:
            - Type (offer/request)
            - Description: The VERBATIM (or slightly cleaned) message content preserving all links and details.
            - Sender Name: The exact name from the "From" field.
+
+        # Role Identifiers (IMPORTANT)
+        The following symbols/acronyms indicate specific roles. If seen in the name or message, they are VALUABLE context, not noise.
+        - 🐊 / Gator -> Gator Lender
+        - ✌️ / Subto -> Subto Student
+        - 🐕 / 🐦 / Bird Dog -> Bird Dog
+        - TC / TTTC -> Transaction Coordinator
+        - OC -> Owners Club
+        - ZDB / Zero Down -> Zero Down Business
+        
+        Do NOT treat a message as noise if it contains these symbols AND contact info/offers, even if short.
+        HOWEVER, if a message is ONLY a symbol (e.g. just "✌️") with no other text, it IS noise/preach.
 
         <transcript_chunk index="{chunk_index}">
         {transcript_text}
@@ -316,126 +356,5 @@ async def extract_summary_with_llm(text: str) -> MeetingSummary:
         logger.error(f"Summary Generation Failed: {e}")
         return MeetingSummary(summary="Failed.", key_topics=[])
 
-async def extract_meeting_data(text: str) -> ExtractedMeetingData:
-    logger.info("Starting Hybrid Extraction...")
-    
-    # 1. Parse Messages
-    raw_messages = parse_transcript_lines(text)
-    if not raw_messages:
-        logger.warning("No messages parsed from transcript! Check date format or regex.")
-    logger.info(f"Parsed {len(raw_messages)} raw messages.")
-    
-    # 2. Extract Hard Contact Info (Deterministic)
-    contacts_map = extract_hard_contact_info(raw_messages)
-    
-    # 3. LLM Intent Analysis (Parallel Chunks) + Summary
-    logger.info("Starting Parallel LLM Tasks...")
-    
-    # Chunking - use smaller chunks configured above
-    chunks = chunk_messages(raw_messages)  # Uses default 50 msg chunks
-    logger.info(f"Split transcript into {len(chunks)} chunks for parallel analysis.")
-    
-    # Create semaphore to limit concurrency (increased for faster processing)
-    sem = asyncio.Semaphore(8)
 
-    async def protected_analyze_chunk(chunk, i):
-        """Analyze chunk with timeout and semaphore protection."""
-        async with sem:
-            try:
-                return await asyncio.wait_for(
-                    analyze_chunk(chunk, i),
-                    timeout=LLM_TIMEOUT_SECONDS
-                )
-            except asyncio.TimeoutError:
-                logger.warning(f"Chunk {i} timed out after {LLM_TIMEOUT_SECONDS}s, skipping...")
-                return IntentAnalysis(services=[], noise_message_ids=[])
-            except Exception as e:
-                logger.error(f"Chunk {i} failed: {e}")
-                return IntentAnalysis(services=[], noise_message_ids=[])
-
-    # Create tasks
-    intent_tasks = [protected_analyze_chunk(chunk, i) for i, chunk in enumerate(chunks)]
-    
-    # Summary also gets a timeout
-    async def protected_summary():
-        try:
-            return await asyncio.wait_for(
-                extract_summary_with_llm(text),
-                timeout=LLM_TIMEOUT_SECONDS * 2  # Summary gets more time
-            )
-        except asyncio.TimeoutError:
-            logger.warning("Summary generation timed out")
-            return MeetingSummary(summary="Summary generation timed out.", key_topics=[])
-    
-    summary_task = protected_summary()
-    
-    # Run all in parallel
-    results = await asyncio.gather(*intent_tasks, summary_task, return_exceptions=True)
-    
-    # Separate results
-    chunk_results = results[:-1]
-    summary = results[-1]
-    
-    # Merge Intent Analysis Results
-    all_services = []
-    all_noise_ids = set()
-    
-    for res in chunk_results:
-        if isinstance(res, IntentAnalysis):
-            all_services.extend(res.services)
-            all_noise_ids.update(res.noise_message_ids)
-    
-    logger.info(f"Merged Parallel Results: {len(all_services)} services, {len(all_noise_ids)} noise items.")
-
-    # 3.5 Stage 2: Relevance Validator
-    logger.info("Running Relevance Validator...")
-    all_services = await validate_services(all_services)
-    logger.info(f"Post-Validation Services: {len(all_services)}")
-
-    # 4. Strict Regex Noise Filter (Post-Processing)
-    # Catches short "Yes/No/Lol" messages that LLM might miss or classify as "Chat" instead of "Noise"
-    # Regex for short conversational fillers. Includes optional punctuation/whitespace.
-    STRICT_NOISE_REGEX = re.compile(r'^\W*(yes|no|nope|nah|yeah|yep|yup|ok|okay|thx|thanks|thank you|lol|lmao|haha|right|correct|sure|agreed|absolutely|less|more|same|me too|details\?)\W*$', re.IGNORECASE)
-    
-    for m in raw_messages:
-        # If it's already marked as noise, skip
-        if m.id in all_noise_ids:
-            continue
-            
-        clean_content = m.message.strip()
-        
-        # Check if it looks like contact info (don't delete phones/emails)
-        has_contact_info = re.search(PHONE_REGEX, clean_content) or re.search(EMAIL_REGEX, clean_content)
-        
-        if not has_contact_info:
-            # If extremely short (< 20 chars) and matches noise words
-            if len(clean_content) < 20 and STRICT_NOISE_REGEX.search(clean_content):
-                 all_noise_ids.add(m.id)
-            # Also filter single emojis/punctuation if needed, but the regex above covers common words
-    
-    # 5. Filter Transcript (Remove Noise)
-    final_transcript = [m for m in raw_messages if m.id not in all_noise_ids]
-    
-    # 5. Build Final Contacts List
-    final_contacts = []
-    for name, info in contacts_map.items():
-        has_service = any(s.contact_name == name for s in all_services)
-        has_contact_data = info["email"] or info["phone"]
-        
-        if has_service or has_contact_data:
-            final_contacts.append(ExtractedContact(
-                name=name,
-                email=info["email"],
-                phone=info["phone"],
-                role=None
-            ))
-            
-    logger.info("Extraction Complete.")
-    
-    return ExtractedMeetingData(
-        contacts=final_contacts,
-        services=all_services,
-        summary=summary,
-        cleaned_transcript=final_transcript
-    )
 

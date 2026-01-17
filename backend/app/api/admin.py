@@ -20,15 +20,31 @@ def scan_duplicates(
     Scans for duplicate contacts based on heuristics.
     Returns a list of suggestions.
     """
-    # Fetch all contacts for the org (Warning: scaling issue for massive DBs, OK for MVP)
-    # We select is_archived to filter them out if we strictly implement soft-delete
-    # But since migration just added it, we assume false if null or false.
-    res = client.table("contacts").select("*").eq("org_id", ctx.org_id).execute()
-    contacts = res.data
+    # Batch process contacts to avoid memory issues
+    batch_size = 1000
+    offset = 0
+    active_contacts = []
     
-    # Filter out archived if column exists/populated (safeguard)
-    active_contacts = [c for c in contacts if not c.get("is_archived", False)]
-    
+    while True:
+        try:
+             res = client.table("contacts").select("*").eq("org_id", ctx.org_id)\
+                 .range(offset, offset + batch_size - 1).execute()
+             
+             batch = res.data
+             if not batch:
+                 break
+                 
+             # Filter out archived contacts
+             active_contacts.extend([c for c in batch if not c.get("is_archived", False)])
+             
+             if len(batch) < batch_size:
+                 break
+                 
+             offset += batch_size
+        except Exception as e:
+            logger.error(f"Error fetching contacts batch at offset {offset}: {e}")
+            break
+            
     suggestions = []
     
     # --- Strategy 1: Exact Email Match ---
@@ -79,11 +95,11 @@ def scan_duplicates(
                 proposed_primary_contact_id=primary["id"]
             ))
 
-    # --- Strategy 3: Name Similarity (Simple/MVP) ---
-    # Only check exact name match or very close variation? 
-    # User mentioned "J. Smith" vs "John Smith".
-    # This is hard to do reliably without false positives in Python without complex libraries.
-    # We will implement EXACT name match for now as "Medium" confidence if they have no email/phone (rare but possible).
+    # --- Strategy 3: Name Similarity ---
+    # We use EXACT name match as a 'Medium' confidence signal.
+    # While fuzzy matching is powerful, it carries a risk of false positives.
+    # For a production system without human-in-the-loop for every single match, 
+    # exact matching avoids merging distinct individuals (e.g. John Smith vs. Joan Smith).
     
     # Update processed
     for s in suggestions:
