@@ -34,38 +34,41 @@ class PipelineState(TypedDict):
 
 # --- Nodes ---
 
-def parse_and_chunk_node(state: PipelineState) -> Dict[str, Any]:
-    """Parses transcript and creates chunks with overlap."""
+async def parse_and_chunk_node(state: PipelineState) -> Dict[str, Any]:
+    """Parses transcript and creates chunks with overlap. Runs in thread to avoid blocking loop."""
     text = state["transcript"]
     logger.info("Parsing transcript...")
-    raw_messages = parse_transcript_lines(text)
     
-    if not raw_messages:
-        logger.warning("No messages parsed.")
-        return {"raw_messages": [], "chunks": []}
+    # Run heavy parsing in thread
+    def parse_logic():
+        raw_messages = parse_transcript_lines(text)
         
-    # Create chunks with overlap
-    chunks = []
-    total_msgs = len(raw_messages)
-    
-    if total_msgs <= CHUNK_SIZE:
-        chunks.append(raw_messages)
-    else:
-        start = 0
-        while start < total_msgs:
-            end = min(start + CHUNK_SIZE, total_msgs)
-            chunks.append(raw_messages[start:end])
+        if not raw_messages:
+            return {"raw_messages": [], "chunks": []}
             
-            # Stop if we reached the end
-            if end >= total_msgs:
-                break
+        # Create chunks with overlap
+        chunks = []
+        total_msgs = len(raw_messages)
+        
+        if total_msgs <= CHUNK_SIZE:
+            chunks.append(raw_messages)
+        else:
+            start = 0
+            while start < total_msgs:
+                end = min(start + CHUNK_SIZE, total_msgs)
+                chunks.append(raw_messages[start:end])
                 
-            # Move start pointer forward by (CHUNK_SIZE - OVERLAP)
-            # This ensures the next chunk starts 'overlap' messages before the current one ended
-            start += (CHUNK_SIZE - CHUNK_OVERLAP)
+                # Stop if we reached the end
+                if end >= total_msgs:
+                    break
+                    
+                # Move start pointer forward by (CHUNK_SIZE - OVERLAP)
+                start += (CHUNK_SIZE - CHUNK_OVERLAP)
+        return {"raw_messages": raw_messages, "chunks": chunks}
 
-    logger.info(f"Created {len(chunks)} chunks from {total_msgs} messages (Overlap={CHUNK_OVERLAP}).")
-    return {"raw_messages": raw_messages, "chunks": chunks}
+    res = await asyncio.to_thread(parse_logic)
+    logger.info(f"Created {len(res['chunks'])} chunks from {len(res['raw_messages'])} messages.")
+    return res
 
 async def extraction_map_node(state: PipelineState) -> Dict[str, Any]:
     """Runs extraction on all chunks in parallel."""
@@ -101,63 +104,74 @@ async def summary_node(state: PipelineState) -> Dict[str, Any]:
     return {"summary_result": summary}
 
 async def deduplicate_and_finalize_node(state: PipelineState) -> Dict[str, Any]:
-    """Merges results, deduplicates services/contacts, and builds final object."""
+    """Merges results, deduplicates services/contacts, and builds final object. Runs in thread."""
     raw_messages = state["raw_messages"]
     chunk_results = state["chunk_results"]
     summary = state["summary_result"]
     
     logger.info("Deduplicating and finalizing results...")
     
-    # 1. Merge all services
-    all_services = []
-    seen_service_hashes = set()
-    
-    for res in chunk_results:
-        for svc in res.services:
-            # Simple content hash for deduplication (overlap might cause exact dupes)
-            # Create unique key based on type, description, and contact
-            svc_id = f"{svc.type}|{svc.contact_name}|{svc.description[:50]}"
-            if svc_id not in seen_service_hashes:
-                all_services.append(svc)
-                seen_service_hashes.add(svc_id)
-    
-    # 2. Extract Hard Contact Info (Pass 1 - Regex + Roles)
-    contacts_map = extract_hard_contact_info(raw_messages)
+    def finalize_logic():
+        # 1. Merge all services
+        all_services = []
+        seen_service_hashes = set()
+        
+        for res in chunk_results:
+            for svc in res.services:
+                # Simple content hash for deduplication (overlap might cause exact dupes)
+                # Create unique key based on type, description, and contact
+                svc_id = f"{svc.type}|{svc.contact_name}|{svc.description[:50]}"
+                if svc_id not in seen_service_hashes:
+                    all_services.append(svc)
+                    seen_service_hashes.add(svc_id)
+        
+        # 2. Extract Hard Contact Info (Pass 1 - Regex + Roles)
+        contacts_map = extract_hard_contact_info(raw_messages)
+        
+        return all_services, contacts_map
+
+    # Run heavy regex/dedup in thread
+    all_services, contacts_map = await asyncio.to_thread(finalize_logic)
     
     # 3. Validation (Optional Step - can be its own node, but fine here)
+    # Validation uses LLM, so it MUST be async and awaited OUTSIDE the thread
     logger.info("Running Relevancy Validator...")
     validated_services = await validate_services(all_services)
     
-    # 4. Build Final Contact List
-    final_contacts = []
-    for name, info in contacts_map.items():
-        # Check if contact is relevant (has service OR valid info)
-        has_service = any(s.contact_name == name for s in validated_services)
-        has_contact_data = info["email"] or info["phone"] or info["roles"]
-        
-        if has_service or has_contact_data:
-            role_str = ", ".join(info["roles"]) if info["roles"] else None
-            final_contacts.append(ExtractedContact(
-                name=name,
-                email=info["email"],
-                phone=info["phone"],
-                role=role_str
-            ))
+    def build_final_data():
+        # 4. Build Final Contact List
+        final_contacts = []
+        for name, info in contacts_map.items():
+            # Check if contact is relevant (has service OR valid info)
+            has_service = any(s.contact_name == name for s in validated_services)
+            has_contact_data = info["email"] or info["phone"] or info["roles"]
             
-    # 5. Filter noise from transcript for 'cleaned_transcript' view
-    # Collect all noise IDs
-    all_noise_ids = set()
-    for res in chunk_results:
-        all_noise_ids.update(res.noise_message_ids)
+            if has_service or has_contact_data:
+                role_str = ", ".join(info["roles"]) if info["roles"] else None
+                final_contacts.append(ExtractedContact(
+                    name=name,
+                    email=info["email"],
+                    phone=info["phone"],
+                    role=role_str
+                ))
+                
+        # 5. Filter noise from transcript for 'cleaned_transcript' view
+        # Collect all noise IDs
+        all_noise_ids = set()
+        for res in chunk_results:
+            all_noise_ids.update(res.noise_message_ids)
+            
+        final_transcript = [m for m in raw_messages if m.id not in all_noise_ids]
         
-    final_transcript = [m for m in raw_messages if m.id not in all_noise_ids]
-    
-    final_data = ExtractedMeetingData(
-        contacts=final_contacts,
-        services=validated_services,
-        summary=summary,
-        cleaned_transcript=final_transcript
-    )
+        return ExtractedMeetingData(
+            contacts=final_contacts,
+            services=validated_services,
+            summary=summary,
+            cleaned_transcript=final_transcript
+        )
+
+    # Run final construction in thread
+    final_data = await asyncio.to_thread(build_final_data)
     
     return {"final_data": final_data}
 
