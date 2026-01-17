@@ -142,6 +142,9 @@ async def process_extraction_background(chat_id: str, user_id: str, org_id: str,
                     update_contact_profile_from_services(client, contact_id, contact_services, contact_roles)
         
         logger.info(f"Background extraction finished for {chat_id}")
+        
+        # Execute the sync DB part in a thread
+        await asyncio.to_thread(save_results_sync)
 
     except asyncio.TimeoutError:
         logger.error(f"Extraction timed out for chat {chat_id} after {EXTRACTION_TIMEOUT_SECONDS}s")
