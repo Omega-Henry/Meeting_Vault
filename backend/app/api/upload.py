@@ -25,9 +25,16 @@ async def process_extraction_background(chat_id: str, user_id: str, org_id: str,
     import asyncio
     logger.info(f"Starting background extraction for chat {chat_id}")
     
-    # Create client early so we can mark as failed on any error
-    client: Client = create_client(settings.SUPABASE_URL, settings.SUPABASE_ANON_KEY)
-    client.auth.set_session(access_token=auth_token, refresh_token=auth_token)
+    # Create client. Use Service Role Key if available for robustness (no expiry/RLS blocks)
+    # Otherwise fallback to user token, but that risks expiry during long tasks.
+    if settings.SUPABASE_SERVICE_ROLE_KEY:
+        client: Client = create_client(settings.SUPABASE_URL, settings.SUPABASE_SERVICE_ROLE_KEY)
+        # No need to set session for service role (it's admin)
+        logger.info("Using Service Role Key for extraction task.")
+    else:
+        client: Client = create_client(settings.SUPABASE_URL, settings.SUPABASE_ANON_KEY)
+        client.auth.set_session(access_token=auth_token, refresh_token=auth_token)
+        logger.warning("Using User Token for extraction task (risk of expiry).")
     
     try:
         # Wrap entire extraction in global timeout
@@ -141,10 +148,10 @@ async def process_extraction_background(chat_id: str, user_id: str, org_id: str,
                 if contact_services or contact_roles:
                     update_contact_profile_from_services(client, contact_id, contact_services, contact_roles)
         
-        logger.info(f"Background extraction finished for {chat_id}")
-        
         # Execute the sync DB part in a thread
         await asyncio.to_thread(save_results_sync)
+        
+        logger.info(f"Background extraction AND saving finished for {chat_id}")
 
     except asyncio.TimeoutError:
         logger.error(f"Extraction timed out for chat {chat_id} after {EXTRACTION_TIMEOUT_SECONDS}s")

@@ -81,7 +81,7 @@ class Service(ServiceBase):
 class MeetingChatBase(BaseModel):
     meeting_name: str
     cleaned_text: str
-    digest_bullets: Optional[List[str]] = None
+    digest_bullets: Optional[Dict[str, Any]] = None
 
 class MeetingChatCreate(MeetingChatBase):
     telegram_chat_id: str = "unknown" # Default for uploaded files
