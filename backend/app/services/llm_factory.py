@@ -62,8 +62,8 @@ def get_llm(
     
     kwargs = {
         "model": model or settings.LLM_MODEL,
-        "api_key": settings.OPENROUTER_API_KEY,
-        "base_url": settings.OPENROUTER_BASE_URL,
+        "openai_api_key": settings.OPENROUTER_API_KEY,
+        "openai_api_base": settings.OPENROUTER_BASE_URL,
         "temperature": temperature,
         "request_timeout": timeout or settings.LLM_REQUEST_TIMEOUT,
     }

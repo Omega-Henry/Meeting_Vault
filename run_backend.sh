@@ -14,8 +14,8 @@ else
 fi
 
 # Ensure dependencies are installed (optional but good for "rapid modifications")
-# echo "Installing/Updating dependencies..."
-# pip install -r requirements.txt
+echo "Installing/Updating dependencies..."
+pip install -r requirements.txt
 
 # Run the FastAPI server with auto-reload
 echo "Starting Backend Server..."

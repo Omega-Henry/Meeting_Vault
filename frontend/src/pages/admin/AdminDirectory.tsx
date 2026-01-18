@@ -1,13 +1,15 @@
 import { useEffect, useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import { supabase } from '../../lib/supabase'
 import { Search, Users, Trash2, X, AlertTriangle } from 'lucide-react'
 import { ContactCard } from '../../components/ContactCard'
 import { ContactDetail } from '../../components/ContactDetail'
 
 export default function AdminDirectory() {
+    const [searchParams] = useSearchParams()
     const [contacts, setContacts] = useState<any[]>([])
     const [loading, setLoading] = useState(true)
-    const [search, setSearch] = useState('')
+    const [search, setSearch] = useState(searchParams.get('search') || '')
 
     // Modal State
     const [detailOpen, setDetailOpen] = useState(false)
@@ -16,6 +18,14 @@ export default function AdminDirectory() {
     // Bulk Selection State
     const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
     const [deleting, setDeleting] = useState(false)
+
+    // Sync search state with URL params
+    useEffect(() => {
+        const urlSearch = searchParams.get('search') || ''
+        if (urlSearch !== search) {
+            setSearch(urlSearch)
+        }
+    }, [searchParams])
 
     useEffect(() => {
         const timer = setTimeout(() => {

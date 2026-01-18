@@ -30,8 +30,11 @@ def is_injection_attempt(query: str) -> bool:
             return True
     return False
 
+from typing import List, Dict, Any
+
 class QueryRequest(BaseModel):
     query: str
+    messages: List[Dict[str, str]] = []
 
 @router.post("/assistant/query")
 async def query_assistant(
@@ -56,7 +59,7 @@ async def query_assistant(
         # But for now we can just await it if we wrap it or just use it directly if it's fast enough.
         # Actually, let's just call it.
         
-        response = run_crew_search(request.query, client)
+        response = run_crew_search(request.query, request.messages, client)
         
         # Map to legacy frontend format for now, or new format if we updated frontend
         # The frontend expects { assistant_text: string, ui: { intent: string, data: any, count: number } }
@@ -73,6 +76,8 @@ async def query_assistant(
         
     except Exception as e:
         # Log error
+        import traceback
+        traceback.print_exc()
         print(f"Agent error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 

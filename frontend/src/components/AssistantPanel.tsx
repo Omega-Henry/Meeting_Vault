@@ -68,7 +68,10 @@ export default function AssistantPanel() {
                     'Content-Type': 'application/json',
                     'Authorization': `Bearer ${token}`
                 },
-                body: JSON.stringify({ query: textToSend })
+                body: JSON.stringify({
+                    query: textToSend,
+                    messages: messages.map(m => ({ role: m.role, content: m.content }))
+                })
             })
 
             if (!res.ok) {
@@ -138,8 +141,12 @@ export default function AssistantPanel() {
                                                 <ContactCard
                                                     key={item.id || i}
                                                     contact={item}
-                                                    onView={(id) => navigate(`/admin/contacts?search=${encodeURIComponent(item.name || '')}`)} // Quick hack, or navigate to detail
-                                                    onMerge={() => { }} // TODO: Hook up merge
+                                                    onView={() => {
+                                                        // Extract first name portion before '|' for cleaner search
+                                                        const cleanName = (item.name || '').split('|')[0].trim()
+                                                        navigate(`/admin/directory?search=${encodeURIComponent(cleanName)}`)
+                                                    }}
+                                                    onMerge={() => { }}
                                                 />
                                             ))}
                                         </div>

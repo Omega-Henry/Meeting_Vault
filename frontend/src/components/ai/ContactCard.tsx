@@ -93,19 +93,19 @@ export default function ContactCard({ contact, onView, onMerge }: ContactCardPro
             {/* Actions Footer */}
             <div className="relative z-10 mt-4 flex gap-2 border-t border-white/5 pt-3 opacity-80 group-hover:opacity-100 transition-opacity">
                 <button
-                    onClick={() => onView && onView(contact.id)}
+                    onClick={() => {
+                        if (onView) {
+                            onView(contact.id)
+                        } else {
+                            window.location.href = `/admin/directory?search=${encodeURIComponent(contact.name || '')}`
+                        }
+                    }}
                     className="flex-1 inline-flex items-center justify-center gap-1.5 rounded-md bg-primary/10 px-2 py-1.5 text-xs font-medium text-primary hover:bg-primary/20 transition-colors"
                 >
                     <ExternalLink className="h-3 w-3" />
                     View Profile
                 </button>
-                <button
-                    onClick={() => onMerge && onMerge(contact.id)}
-                    className="inline-flex items-center justify-center gap-1.5 rounded-md bg-muted px-2 py-1.5 text-xs font-medium text-muted-foreground hover:bg-muted/80 hover:text-foreground transition-colors"
-                    title="Merge Contact"
-                >
-                    <Merge className="h-3 w-3" />
-                </button>
+
             </div>
         </div>
     )

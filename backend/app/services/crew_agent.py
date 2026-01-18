@@ -3,12 +3,12 @@ import logging
 from typing import List, Dict, Any, Optional
 from pydantic import BaseModel, Field
 
-from crewai import Agent, Task, Crew, Process
+from crewai import Agent, Task, Crew, Process, LLM
 from langchain_core.tools import tool
 
 from app.core.config import settings
 from app.services import tools as db_tools
-from app.services.llm_factory import get_llm
+# from app.services.llm_factory import get_llm # Deprecated for CrewAI
 
 logger = logging.getLogger(__name__)
 
@@ -16,100 +16,49 @@ logger = logging.getLogger(__name__)
 # TOOLS
 # =============================================================================
 
-class DatabaseTools:
-    """
-    Set of SAFE, READ-ONLY database tools for the Crew.
-    """
-    
-    @tool("Search Contacts")
-    def search_contacts(query: str):
-        """
-        Search for contacts by name, email, or simple keyword. 
-        Useful for finding specific people.
-        """
-        # We need a client. In CrewAI, tools usually don't have context injection easily
-        # without custom classes. We'll grab a client from a context variable or 
-        # initialize a service role client for this specific 'internal' agent.
-        # For safety/RLS, normally we want the user's client. 
-        # But for an 'Internal Expert', we might use the admin client and filter by user_id if needed.
-        # For this implementation, we will assume we can access a global or contextual client, 
-        # OR we will require the agent to pass the user_id implicitly.
-        # 
-        # Let's use the 'supa_client' passed in the tool's bind or global context if possible.
-        # However, for simplicity here, we'll instantiate a fresh client or use the `db_tools` which need a client.
-        
-        # ACTUALLY: The best pattern for CrewAI + FastAPI + RLS is to pass the 'client' 
-        # into the tool constructor if using class-based tools, or look it up.
-        # Since these are static @tool decorators, we'll use a ContextVar or similar if strictly needed.
-        # But `db_tools` functions require `client`.
-        # 
-        # WORKAROUND: We will define a class `CrewToolKit` that is initialized with the client.
-        pass
+from crewai.tools import BaseTool
+from pydantic import PrivateAttr, Field
 
-class SafeDbSearchTool:
-    def __init__(self, client):
-        self.client = client
+# Define Custom Tools using CrewAI BaseTool
+class SearchContactsTool(BaseTool):
+    name: str = "Search Contacts"
+    description: str = "Search contacts by name, email, or bio. Returns JSON list."
+    client: Any = Field(description="Supabase client", exclude=True)
 
-    @tool("Search Contacts Vector")
-    def search_contacts(self, query: str):
-        """
-        Search contacts by semantic query (name, bio, role).
-        Use this to find people based on description.
-        """
-        # This needs to call db_tools.search_contacts(client, query)
-        # But 'self' isn't available in the static method decorated by @tool.
-        # We will define the tools dynamically or use the `StructuredTool` from langchain.
-        pass
+    def _run(self, query: str) -> str:
+        return json.dumps(db_tools.search_contacts(self.client, query), default=str)
 
-# We will use a function-factory approach to generate tools bound to a client
-def get_crew_tools(client):
-    
-    @tool("Search Contacts (Name/Email/Bio)")
-    def search_contacts_tool(query: str) -> str:
-        """
-        Search contacts by text query. Returns JSON list of matches with IDs and names.
-        """
-        return json.dumps(db_tools.search_contacts(client, query), default=str)
+class GetContactDetailsTool(BaseTool):
+    name: str = "Get Contact Details"
+    description: str = "Get full detailed profile of a specific contact by ID."
+    client: Any = Field(description="Supabase client", exclude=True)
 
-    @tool("Get Contact Details")
-    def get_contact_details_tool(contact_id: str) -> str:
-        """
-        Get full detailed profile of a specific contact by ID.
-        Includes bio, asset classes, buy box, etc.
-        """
-        # We don't have a direct 'get_contact' in db_tools exposed yet, 
-        # but search_contacts returns details.
-        # Let's reuse search or assume the Analyst needs deep dive.
-        # We will just search by ID which works in many search impls, or add a specific get.
-        
-        # Quick impl using supabase directly for specific ID
-        res = client.table("contacts").select("*, contact_profiles(*)").eq("id", contact_id).execute()
+    def _run(self, contact_id: str) -> str:
+        res = self.client.table("contacts").select("*, contact_profiles(*)").eq("id", contact_id).execute()
         if res.data:
             return json.dumps(res.data[0], default=str)
         return "Contact not found."
 
-    @tool("Advanced Filter (Structured)")
-    def advanced_search_tool(
-        role_tags: Optional[List[str]] = None,
-        asset_classes: Optional[List[str]] = None,
-        markets: Optional[List[str]] = None,
+class AdvancedSearchTool(BaseTool):
+    name: str = "Advanced Structured Search"
+    description: str = "Precise database search with filters like role_tags, asset_classes, markets, price."
+    client: Any = Field(description="Supabase client", exclude=True)
+
+    def _run(
+        self, 
+        role_tags: Optional[List[str]] = None, 
+        asset_classes: Optional[List[str]] = None, 
+        markets: Optional[List[str]] = None, 
         min_price: Optional[float] = None, 
         max_price: Optional[float] = None
     ) -> str:
-        """
-        Precise database search. Use this when you have specific criteria.
-        - role_tags: ['lender', 'buyer', 'gator', 'wholesaler']
-        - asset_classes: ['SFH', 'Multifamily', 'Commercial']
-        - markets: State codes like ['TX', 'FL', 'MO']
-        - min_price/max_price: numeric
-        """
         # Ensure lists are lists
         if role_tags and isinstance(role_tags, str): role_tags = [role_tags]
         if asset_classes and isinstance(asset_classes, str): asset_classes = [asset_classes]
         if markets and isinstance(markets, str): markets = [markets]
         
         data = db_tools.advanced_contact_search(
-            client,
+            self.client,
             role_tags=role_tags,
             asset_classes=asset_classes,
             markets=markets,
@@ -118,25 +67,40 @@ def get_crew_tools(client):
         )
         return json.dumps(data, default=str)
 
-    return [search_contacts_tool, get_contact_details_tool, advanced_search_tool]
+def get_crew_tools(client):
+    return [
+        SearchContactsTool(client=client),
+        GetContactDetailsTool(client=client),
+        AdvancedSearchTool(client=client)
+    ]
 
-
-# =============================================================================
-# AGENTS
-# =============================================================================
 
 def create_agents(tools):
-    # Use the centralized LLM factory which supports OpenRouter
-    llm = get_llm()
+    # Use CrewAI's native LLM class which uses LiteLLM under the hood.
+    # We point it to OpenRouter.
+    # "openai/" prefix tells LiteLLM to use OpenAI-compatible endpoint.
+    # If the user has LLM_MODEL set (e.g. "anthropic/claude-3"), we use it. 
+    # Default to a smart model effectively.
+    
+    model_name = settings.LLM_MODEL or "openai/gpt-4o"
+    if not model_name.startswith("openai/") and not "/" in model_name:
+         # If just "gpt-4o", prepend openai/ for safety with base_url
+         model_name = f"openai/{model_name}"
+
+    llm = LLM(
+        model=model_name,
+        api_key=settings.OPENROUTER_API_KEY,
+        base_url=settings.OPENROUTER_BASE_URL
+    )
     
     # 1. The Data Custodian
+    # (Optional now if Analyst does the work, but we keep it for potential future use or just unused)
     custodian = Agent(
         role='Data Custodian',
         goal='Retrieve accurate data from the database based on strict criteria.',
         backstory="""You are the guardian of the MeetingVault database. 
         You speak SQL (figuratively) and precise JSON. 
-        You never guess. You only return what is in the database.
-        You take the Analyst's translated requirements and run the correct tool.""",
+        You never guess. You only return what is in the database.""",
         tools=tools,
         verbose=True,
         allow_delegation=False,
@@ -144,17 +108,28 @@ def create_agents(tools):
     )
 
     # 2. The Domain Analyst
+    # We give tools to Analyst so it can search directly.
     analyst = Agent(
         role='Domain Analyst',
-        goal='Translate real estate jargon into database filters.',
-        backstory="""You are a Real Estate expert. You know that:
-        - "Gator" means EMD Lender (Role: lender or gator).
-        - "Subto" means Subject-To (Role: subto).
-        - "Whale" usually means a Buyer with high max_price (> 1M) or 'investor'.
-        - "Hotel" is Commercial asset class.
-        Your job is to take the user's intent and give the Custodian precise instructions.""",
+        goal='Translate user requests into database searches and ALWAYS EXECUTE.',
+        backstory="""You are a Real Estate database expert. Your job is to SEARCH the database.
+
+        DOMAIN KNOWLEDGE:
+        - "Gator" = EMD Lender (role: lender or gator)
+        - "Subto" = Subject-To investor (role: subto)
+        - "Whale" = High-value buyer (max_price > 1M)
+        - "Park" = Mobile Home Park or RV Park (asset_class: park)
+        - "Land" = Vacant land (asset_class: land)
+        
+        CRITICAL RULES:
+        1. ALWAYS RUN A SEARCH when the user asks for contacts, buyers, sellers, lenders, or any real estate role.
+        2. If the query is vague, do a BROAD search (e.g. no location filter).
+        3. If the user says "nationwide", search WITHOUT a location filter.
+        4. NEVER just return "no contacts" without actually running the search tool.
+        5. Only skip searching for pure greetings like "hello" or "thanks".""",
         verbose=True,
-        allow_delegation=True, # Can delegate to Custodian
+        tools=tools,
+        allow_delegation=False,
         llm=llm
     )
 
@@ -168,7 +143,7 @@ def create_agents(tools):
         - You coordinate the Analyst to get data.
         - You format the final answer to be clean and concise.""",
         verbose=True,
-        allow_delegation=True, # Delegates to Analyst
+        allow_delegation=False,
         llm=llm
     )
     
@@ -183,59 +158,103 @@ class AssistantResponse(BaseModel):
     ui_cards: List[Dict[str, Any]] = Field(default_factory=list)
     suggestions: List[str] = Field(default_factory=list)
 
-def run_crew_search(query: str, client) -> AssistantResponse:
+def run_crew_search(query: str, messages: List[Dict[str, str]], client) -> AssistantResponse:
     """
     Main entry point to run the CrewAI pipeline.
     """
     tools = get_crew_tools(client)
     manager, analyst, custodian = create_agents(tools)
     
+    # Format History
+    # We take the last 5 messages to avoid blowing up the context window
+    recent_messages = messages[-5:]
+    history_context = ""
+    if recent_messages:
+        history_context = "=== CONVERSATION HISTORY ===\n"
+        for msg in recent_messages:
+            role = msg.get("role", "user")
+            content = msg.get("content", "")
+            history_context += f"{role.upper()}: {content}\n"
+        history_context += "============================\n"
+
     # Define the process
-    # Task 1: Analyze and Search
-    # We'll create a single complex task or a sequential set. 
-    # For speed, let's do a hierarchical approach or sequential.
-    # Manager -> Analyst -> Custodian is the flow.
-    
-    task_analyze_and_fetch = Task(
+    # Task 1: Search (Assigned to Analyst)
+    # This forces the agent to actually use the tools to find data first.
+    search_task = Task(
         description=f"""
-        The user asked: "{query}".
+        {history_context}
         
-        1. Search Phase:
-           - Analyze the query for real estate terms.
-           - Search the database using the tools.
+        The user just asked: "{query}".
         
-        2. Response Phase:
-           - If contacts/services are found, you MUST include their details in the output.
-           - If "I don't know" or ambiguity, provide helpful defaults.
+        YOUR MISSION: Search the database to fulfill the user's request.
+        
+        ACTIONS:
+        1. Parse the query for: role (buyer, seller, lender, gator, subto), asset_class (land, park, multifamily), location (city, state), and other keywords.
+        2. RUN the search_contacts or advanced_search tool with appropriate filters.
+        3. If the query mentions "nationwide" or doesn't specify location, search WITHOUT location filter.
+        4. If the query is just a greeting ("hello") or thanks, return "GREETING_ONLY".
+        
+        Return the raw search results (JSON list of contacts).
+        """,
+        expected_output="Raw JSON list of contacts from the database, or 'GREETING_ONLY' for simple greetings.",
+        agent=analyst
+    )
+
+    # Task 2: Format & Response (Assigned to Manager)
+    # This agent takes the findings and formats them for the frontend.
+    response_task = Task(
+        description=f"""
+        Review the search results from the previous task.
+        
+        The user's original query was: "{query}"
+        
+        RESPONSE LOGIC:
+        
+        1. IF findings == "GREETING_ONLY":
+           - Reply conversationally (e.g. "Hello! How can I help you find contacts today?").
+           - Return empty ui_cards.
            
-        CRITICAL OUTPUT FORMAT:
-        You must return a valid JSON object (no markdown formatting, just raw JSON) with this structure:
+        2. IF contacts were found (a list of results):
+           - In 'text', write a brief summary: "I found X contacts matching your search."
+           - DO NOT list contact details in 'text'. Put them in 'ui_cards'.
+           - Each ui_card should have: type, id, name, email, phone, location, role_tags, match_reason.
+           
+        3. IF 0 results were found:
+           - Say "No contacts found matching your criteria."
+           - Suggest the user try broader terms or different filters.
+        
+        RULES:
+        - NEVER invent contacts. Only use data from the search results.
+        - Keep 'text' short and professional.
+        
+        OUTPUT FORMAT (valid JSON only, no markdown):
         {{
-            "text": "Your friendly conversation response here.",
+            "text": "Brief summary here",
             "ui_cards": [
                 {{
                     "type": "contact",
                     "id": "uuid",
-                    "name": "Name",
+                    "name": "Full Name",
                     "email": "email@example.com",
-                    "phone": "123-456-7890",
+                    "phone": "555-1234",
                     "location": "City, State",
-                    "role_tags": ["tag1"],
-                    "match_reason": "Why this result matches"
+                    "role_tags": ["buyer", "investor"],
+                    "match_reason": "Why this contact matches"
                 }}
             ],
-            "suggestions": ["Suggestion 1", "Suggestion 2"]
+            "suggestions": ["Try searching by region", "Filter by role"]
         }}
         """,
         expected_output="A valid JSON object containing 'text', 'ui_cards', and 'suggestions'.",
-        agent=manager
+        agent=manager,
+        context=[search_task]
     )
-    
+
     # CrewAI Execution
     crew = Crew(
-        agents=[manager, analyst, custodian],
-        tasks=[task_analyze_and_fetch],
-        verbose=1,
+        agents=[analyst, manager],
+        tasks=[search_task, response_task],
+        verbose=True,
         process=Process.sequential
     )
     
@@ -259,7 +278,7 @@ def run_crew_search(query: str, client) -> AssistantResponse:
         )
     except Exception as e:
         logger.error(f"Failed to parse CrewAI JSON: {e}. Raw: {raw_result}")
-        # Fallback
+        # Fallback: Treat the entire raw result as the text response
         return AssistantResponse(
             text=raw_result,
             ui_cards=[],
