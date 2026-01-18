@@ -40,15 +40,26 @@ export default function ChatDetail() {
         }
         fetchData()
 
-        // Polling if processing
-        const interval = setInterval(() => {
-            if (chat && chat.digest_bullets?.summary === 'Processing...') {
+        // Poll every 3 seconds while processing
+        const interval = setInterval(async () => {
+            if (!id) return
+            const chatRes = await supabase
+                .from('meeting_chats')
+                .select('digest_bullets')
+                .eq('id', id)
+                .single()
+
+            if (chatRes.data?.digest_bullets?.summary === 'Processing...') {
+                fetchData() // Re-fetch everything if still processing
+            } else if (chatRes.data) {
+                // If processing just completed, do one final full refresh
                 fetchData()
+                clearInterval(interval)
             }
         }, 3000)
 
         return () => clearInterval(interval)
-    }, [id, chat?.digest_bullets?.summary])
+    }, [id])
 
     const handleDelete = async () => {
         if (!confirm("Are you sure you want to delete this chat? This will remove all extracted services and data associated with this meeting.")) {
@@ -188,7 +199,21 @@ export default function ChatDetail() {
                                     })
                             }} />
                     ))}
-                    {services.length === 0 && (
+                    {services.length === 0 && chat?.digest_bullets?.summary === 'Processing...' && (
+                        <div className="col-span-full flex items-center justify-center p-8 border-2 border-dashed rounded-lg">
+                            <div className="text-center space-y-2">
+                                <div className="flex items-center justify-center gap-2 text-amber-600 font-medium">
+                                    <span className="relative flex h-2 w-2">
+                                        <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75"></span>
+                                        <span className="relative inline-flex rounded-full h-2 w-2 bg-amber-500"></span>
+                                    </span>
+                                    AI Extraction in Progress...
+                                </div>
+                                <p className="text-sm text-muted-foreground">Services will appear here once processing completes.</p>
+                            </div>
+                        </div>
+                    )}
+                    {services.length === 0 && chat?.digest_bullets?.summary !== 'Processing...' && (
                         <p className="text-sm text-muted-foreground col-span-full">No services extracted.</p>
                     )}
                 </div>

@@ -1,26 +1,55 @@
-from typing import Annotated, TypedDict, Union, List, Dict, Any
+"""
+LangGraph Agent Module
+
+This module implements the AI Assistant agent that helps users query the
+MeetingVault database. It uses LangGraph for orchestration and provides
+tool-based database access.
+
+Features:
+- Tool-based database queries (contacts, services, chats)
+- Rate-limited LLM calls via llm_factory
+- Retry logic for transient failures
+- Structured response formatting for UI
+"""
+import json
+import logging
+from typing import TypedDict, List, Dict, Any
+
 from langgraph.graph import StateGraph, END
 from langgraph.graph.message import add_messages
-from langchain_core.messages import BaseMessage, HumanMessage, AIMessage, SystemMessage, ToolMessage
-from langchain_openai import ChatOpenAI
+from langchain_core.messages import (
+    BaseMessage, 
+    HumanMessage, 
+    AIMessage, 
+    SystemMessage, 
+    ToolMessage
+)
 from langchain_core.tools import tool
 from langchain_core.runnables import RunnableConfig
-from app.services import tools as db_tools
-from app.core.config import settings
-import json
+from typing import Annotated
 
-# State definition
+from app.services import tools as db_tools
+from app.services.llm_factory import get_llm, invoke_with_retry
+from app.core.config import settings
+
+logger = logging.getLogger(__name__)
+
+
+# =============================================================================
+# STATE DEFINITION
+# =============================================================================
+
 class AgentState(TypedDict):
+    """State maintained throughout agent execution."""
     messages: Annotated[List[BaseMessage], add_messages]
     user_id: str
-    intent: str
-    tool_calls: List[Dict[str, Any]]
     tool_outputs: List[Dict[str, Any]]
     final_response: Dict[str, Any]
 
-# We need to create the tools dynamically per request to inject the client
-# But LangGraph usually defines the graph once.
-# We can pass the client in the 'configurable' config and access it in the tool.
+
+# =============================================================================
+# TOOL DEFINITIONS
+# =============================================================================
 
 @tool
 def list_chats_tool(limit: int = 10, offset: int = 0, config: RunnableConfig = None) -> str:
@@ -29,12 +58,14 @@ def list_chats_tool(limit: int = 10, offset: int = 0, config: RunnableConfig = N
     data = db_tools.list_meeting_chats(client, limit, offset)
     return json.dumps(data, default=str)
 
+
 @tool
 def get_chat_tool(meeting_id: str, config: RunnableConfig = None) -> str:
     """Get details of a meeting chat by ID. Returns JSON string."""
     client = config["configurable"]["supabase_client"]
     data = db_tools.get_meeting_chat(client, meeting_id)
     return json.dumps(data, default=str)
+
 
 @tool
 def search_contacts_tool(query: str, config: RunnableConfig = None) -> str:
@@ -43,6 +74,7 @@ def search_contacts_tool(query: str, config: RunnableConfig = None) -> str:
     data = db_tools.search_contacts(client, query)
     return json.dumps(data, default=str)
 
+
 @tool
 def list_services_tool(type_filter: str = None, config: RunnableConfig = None) -> str:
     """List services. type_filter can be 'offer' or 'request'. Returns JSON string."""
@@ -50,12 +82,14 @@ def list_services_tool(type_filter: str = None, config: RunnableConfig = None) -
     data = db_tools.list_services(client, type_filter)
     return json.dumps(data, default=str)
 
+
 @tool
 def search_everything_tool(query: str, config: RunnableConfig = None) -> str:
     """Search across chats, contacts, and services. Returns JSON string."""
     client = config["configurable"]["supabase_client"]
     data = db_tools.search_everything(client, query)
     return json.dumps(data, default=str)
+
 
 @tool
 def advanced_contact_search_tool(
@@ -100,29 +134,23 @@ def advanced_contact_search_tool(
     )
     return json.dumps(data, default=str)
 
-ALL_TOOLS = [list_chats_tool, get_chat_tool, search_contacts_tool, list_services_tool, search_everything_tool, advanced_contact_search_tool]
 
-# Nodes
+# All available tools
+ALL_TOOLS = [
+    list_chats_tool, 
+    get_chat_tool, 
+    search_contacts_tool, 
+    list_services_tool, 
+    search_everything_tool, 
+    advanced_contact_search_tool
+]
 
-def intent_router(state: AgentState):
-    # Router to determine initial intent. 
-    # Currently defaults to 'general' to let the Planner decide tool usage.
-    return {"intent": "general"}
 
+# =============================================================================
+# SYSTEM PROMPT
+# =============================================================================
 
-def planner_node(state: AgentState):
-    # This node calls the LLM to decide which tools to call
-    # Use OpenRouter if key is present, otherwise fallback to OpenAI key
-    api_key = settings.OPENROUTER_API_KEY or settings.OPENAI_API_KEY
-    base_url = settings.OPENROUTER_BASE_URL if settings.OPENROUTER_API_KEY else None
-    
-    model = ChatOpenAI(
-        model=settings.LLM_MODEL, 
-        api_key=api_key,
-        base_url=base_url
-    )
-    
-    system_msg = SystemMessage(content="""You are a DATABASE SEARCH ASSISTANT for MeetingVault. Your ONLY job is to search the database and return results.
+SYSTEM_PROMPT = """You are a DATABASE SEARCH ASSISTANT for MeetingVault. Your ONLY job is to search the database and return results.
 
 === CRITICAL BEHAVIOR RULES ===
 1. You are NOT a general assistant. You CANNOT give advice, explanations, or information from your knowledge.
@@ -162,21 +190,48 @@ YOU: "I can only search the MeetingVault database. Would you like me to find len
 
 User: "Find buyers in Texas for SFH"
 YOU: Call advanced_contact_search_tool(markets=["TX"], asset_classes=["SFH"], role_tags=["buyer"])
-""")
+"""
+
+
+# =============================================================================
+# GRAPH NODES
+# =============================================================================
+
+async def planner_node(state: AgentState) -> Dict[str, Any]:
+    """
+    Main LLM node that decides which tools to call.
+    Uses centralized LLM factory with retry.
+    """
+    # Get LLM with rate limiting
+    model = get_llm()
     
+    # Build messages with system prompt
+    system_msg = SystemMessage(content=SYSTEM_PROMPT)
     messages = [system_msg] + state["messages"]
     
+    # Bind tools to model
     model_with_tools = model.bind_tools(ALL_TOOLS)
-    response = model_with_tools.invoke(messages)
-    return {"messages": [response]}
+    
+    try:
+        # Use retry wrapper for robustness
+        response = await invoke_with_retry(model_with_tools, messages)
+        return {"messages": [response]}
+    except Exception as e:
+        logger.error(f"Planner node failed: {e}")
+        # Return error message to user
+        error_msg = AIMessage(content="I encountered an error processing your request. Please try again.")
+        return {"messages": [error_msg]}
 
-def executor_node(state: AgentState, config: RunnableConfig):
+
+def executor_node(state: AgentState, config: RunnableConfig) -> Dict[str, Any]:
+    """
+    Executes tool calls from the planner.
+    Includes retry logic for transient database failures.
+    """
     messages = state["messages"]
     last_message = messages[-1]
     
-    # Create tool map
     tool_map = {t.name: t for t in ALL_TOOLS}
-    
     tool_outputs = []
     tool_messages = []
     
@@ -187,12 +242,29 @@ def executor_node(state: AgentState, config: RunnableConfig):
             
             tool_func = tool_map.get(tool_name)
             if tool_func:
-                # We invoke the tool. The tool expects 'config' for client.
-                try:
-                    # bind_tools usually handles arg parsing, invoc handles passing config if needed
-                    output = tool_func.invoke(tool_args, config=config)
-                except Exception as e:
-                    output = f"Error executing tool {tool_name}: {e}"
+                # Execute tool with retry for transient failures
+                max_retries = settings.LLM_MAX_RETRIES
+                last_error = None
+                
+                for attempt in range(max_retries + 1):
+                    try:
+                        output = tool_func.invoke(tool_args, config=config)
+                        break
+                    except Exception as e:
+                        last_error = e
+                        if attempt < max_retries:
+                            import time
+                            delay = settings.LLM_RETRY_INITIAL_DELAY * (
+                                settings.LLM_RETRY_BACKOFF_FACTOR ** attempt
+                            )
+                            logger.warning(
+                                f"Tool {tool_name} attempt {attempt + 1} failed: {e}. "
+                                f"Retrying in {delay:.1f}s..."
+                            )
+                            time.sleep(delay)
+                        else:
+                            output = f"Error executing tool {tool_name} after {max_retries + 1} attempts: {e}"
+                            logger.error(output)
                 
                 tool_outputs.append({
                     "name": tool_name,
@@ -206,48 +278,39 @@ def executor_node(state: AgentState, config: RunnableConfig):
                     name=tool_name
                 ))
             else:
-                 tool_messages.append(ToolMessage(
+                tool_messages.append(ToolMessage(
                     content=f"Tool {tool_name} not found",
                     tool_call_id=tool_call["id"],
                     name=tool_name
-                 ))
+                ))
                  
     return {
         "messages": tool_messages,
         "tool_outputs": tool_outputs
     }
 
-def formatter_node(state: AgentState):
-    # Generate final response
-    api_key = settings.OPENROUTER_API_KEY or settings.OPENAI_API_KEY
-    base_url = settings.OPENROUTER_BASE_URL if settings.OPENROUTER_API_KEY else None
+
+async def formatter_node(state: AgentState) -> Dict[str, Any]:
+    """
+    Generates final response and formats for UI.
+    """
+    model = get_llm()
     
-    model = ChatOpenAI(
-        model=settings.LLM_MODEL, 
-        api_key=api_key,
-        base_url=base_url
-    )
+    try:
+        response = await invoke_with_retry(model, state["messages"])
+    except Exception as e:
+        logger.error(f"Formatter node failed: {e}")
+        response = AIMessage(content="I encountered an error. Please try again.")
     
-    # Check if we have tool outputs to format
-    last_tool_outputs = state.get("tool_outputs", [])
-    
-    if last_tool_outputs:
-        # If we just ran tools, ask LLM to summarize
-        pass
-    else:
-        # If no tools run, maybe we are just asking for clarification
-        pass
-        
-    response = model.invoke(state["messages"])
-    
-    # Construct UI payload
+    # Build UI payload
     ui_data = {"intent": "chat", "data": {}, "count": 0}
     
+    last_tool_outputs = state.get("tool_outputs", [])
     if last_tool_outputs:
         last_output = last_tool_outputs[-1]
         try:
             data = json.loads(last_output["output"])
-            # Handle list vs dict
+            
             if isinstance(data, list):
                 ui_data["count"] = len(data)
                 ui_data["data"] = data
@@ -259,11 +322,15 @@ def formatter_node(state: AgentState):
                     ui_data["filters_applied"] = data.get("filters_applied", [])
                 # Handle search_everything output
                 elif "contacts" in data:
-                    ui_data["count"] = len(data.get("contacts", [])) + len(data.get("services", [])) + len(data.get("chats", []))
+                    ui_data["count"] = (
+                        len(data.get("contacts", [])) + 
+                        len(data.get("services", [])) + 
+                        len(data.get("chats", []))
+                    )
             
             ui_data["intent"] = last_output["name"].replace("_tool", "")
-        except:
-             pass
+        except (json.JSONDecodeError, KeyError):
+            pass
 
     return {
         "final_response": {
@@ -272,28 +339,38 @@ def formatter_node(state: AgentState):
         }
     }
 
-def should_continue(state: AgentState):
+
+def should_continue(state: AgentState) -> str:
+    """Routing function to decide next node."""
     last_message = state["messages"][-1]
     if isinstance(last_message, AIMessage) and last_message.tool_calls:
         return "executor"
     return "formatter"
 
-# Build Graph
-workflow = StateGraph(AgentState)
 
-workflow.add_node("intent_router", intent_router)
-workflow.add_node("planner", planner_node)
-workflow.add_node("executor", executor_node)
-workflow.add_node("formatter", formatter_node)
+# =============================================================================
+# GRAPH CONSTRUCTION
+# =============================================================================
 
-workflow.set_entry_point("intent_router")
-workflow.add_edge("intent_router", "planner")
-workflow.add_conditional_edges("planner", should_continue)
-workflow.add_edge("executor", "planner") # ReAct loop: Planner -> Executor -> Planner
-# To ensure stability and avoid infinite loops, we can also enforce a max depth or strict flow.
-# For this implementation, we allow the planner to decide if it needs to run more tools or exit.
+def build_agent_graph():
+    """Builds the agent graph."""
+    workflow = StateGraph(AgentState)
 
-workflow.add_edge("executor", "formatter") 
-workflow.add_edge("formatter", END)
+    # Add nodes
+    workflow.add_node("planner", planner_node)
+    workflow.add_node("executor", executor_node)
+    workflow.add_node("formatter", formatter_node)
 
-app_graph = workflow.compile()
+    # Set entry point
+    workflow.set_entry_point("planner")
+
+    # Define edges
+    workflow.add_conditional_edges("planner", should_continue)
+    workflow.add_edge("executor", "planner")  # ReAct loop: Planner -> Executor -> Planner
+    workflow.add_edge("formatter", END)
+
+    return workflow.compile()
+
+
+# Singleton compiled graph
+app_graph = build_agent_graph()

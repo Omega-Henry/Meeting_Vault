@@ -1,10 +1,27 @@
+# Core FastAPI stack
 fastapi
 uvicorn[standard]
 python-multipart
 pydantic-settings
+
+# Database
 supabase
-langchain
-langgraph
-langchain-openai
+
+# LangChain ecosystem (with version pins for stability)
+langchain>=0.3.0
+langgraph>=0.2.0
+langchain-openai>=0.2.0
+langchain-core>=0.3.0
+
+# Auth
 python-jose[cryptography]
+
+# HTTP client
 httpx
+
+# Structured Logging
+structlog
+python-json-logger
+
+# Fuzzy matching for duplicate detection
+rapidfuzz

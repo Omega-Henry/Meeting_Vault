@@ -1,15 +1,31 @@
-from fastapi import APIRouter, Depends, HTTPException, Body
-from typing import List, Dict, Any
+from fastapi import APIRouter, Depends, HTTPException, Body, BackgroundTasks
+from pydantic import BaseModel
+from typing import List, Dict, Any, Optional
 from supabase import Client
-from app.dependencies import require_admin, UserContext, get_supabase_client
+from app.dependencies import require_admin, UserContext, get_supabase_client, get_service_role_client
 from app.schemas import MergeSuggestion, MergeRequest
 import uuid
 import logging
 from collections import defaultdict
 import datetime
+import asyncio
+from app.services.hybrid_extraction import enrich_profile_from_services_with_llm
+from app.core.config import settings
+from rapidfuzz import fuzz
+
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
+
+# Simple in-memory status for the profile scan job
+# In a multi-worker env, this should be in Redis/DB, but for this singe-instance tool, memory is fine.
+SCAN_JOB_STATUS = {
+    "is_running": False,
+    "total": 0,
+    "processed": 0,
+    "status": "idle" # idle, running, completed, failed
+}
+
 
 @router.post("/scan-duplicates", response_model=List[MergeSuggestion])
 def scan_duplicates(
@@ -126,6 +142,297 @@ def scan_duplicates(
             ))
 
     return suggestions
+
+
+@router.post("/scan-duplicates-fuzzy", response_model=List[MergeSuggestion])
+def scan_duplicates_fuzzy(
+    ctx: UserContext = Depends(require_admin),
+    client: Client = Depends(get_supabase_client),
+    min_similarity: int = 80  # 0-100 similarity threshold
+):
+    """
+    Scans for duplicate contacts using FUZZY name matching.
+    Returns suggestions for admin manual review.
+    Higher min_similarity = stricter matching (fewer false positives).
+    """
+    # Fetch active contacts
+    res = client.table("contacts").select("*").eq("org_id", ctx.org_id).execute()
+    active_contacts = [c for c in (res.data or []) if not c.get("is_archived", False)]
+    
+    logger.info(f"Running fuzzy duplicate scan on {len(active_contacts)} contacts (min_similarity={min_similarity})")
+    
+    suggestions = []
+    processed_pairs = set()
+    
+    # Compare each contact with every other contact
+    for i, contact_a in enumerate(active_contacts):
+        name_a = contact_a.get("name", "").strip()
+        if not name_a or name_a.lower() == "unattributed":
+            continue
+        
+        for j in range(i + 1, len(active_contacts)):
+            contact_b = active_contacts[j]
+            name_b = contact_b.get("name", "").strip()
+            
+            if not name_b or name_b.lower() == "unattributed":
+                continue
+            
+            # Create pair ID to avoid duplicate suggestions
+            pair_id = tuple(sorted([contact_a["id"], contact_b["id"]]))
+            if pair_id in processed_pairs:
+                continue
+            
+            # Calculate similarity using token-based matching (handles variations)
+            similarity = fuzz.token_set_ratio(name_a.lower(), name_b.lower())
+            
+            if similarity >= min_similarity:
+                # Additional signals to boost confidence
+                reasons = [f"Name similarity: {similarity}% ('{name_a}' vs '{name_b}')"]
+                confidence = "Medium"
+                
+                # Check for matching email/phone to upgrade confidence
+                if contact_a.get("email") and contact_b.get("email"):
+                    if contact_a["email"].lower() == contact_b["email"].lower():
+                        reasons.append("Matching email")
+                        confidence = "High"
+                
+                if contact_a.get("phone") and contact_b.get("phone"):
+                    phone_a = ''.join(filter(str.isdigit, contact_a["phone"]))
+                    phone_b = ''.join(filter(str.isdigit, contact_b["phone"]))
+                    if phone_a == phone_b and len(phone_a) > 6:
+                        reasons.append("Matching phone")
+                        confidence = "High"
+                
+                # Pick primary (prefer one with more data)
+                score_a = sum([
+                    bool(contact_a.get("email")),
+                    bool(contact_a.get("phone")),
+                    len(contact_a.get("name", "")) > 5
+                ])
+                score_b = sum([
+                    bool(contact_b.get("email")),
+                    bool(contact_b.get("phone")),
+                    len(contact_b.get("name", "")) > 5
+                ])
+                
+                primary_id = contact_a["id"] if score_a >= score_b else contact_b["id"]
+                
+                suggestions.append(MergeSuggestion(
+                    suggestion_id=str(uuid.uuid4()),
+                    contact_ids=[contact_a["id"], contact_b["id"]],
+                    confidence=confidence,
+                    reasons=reasons,
+                    proposed_primary_contact_id=primary_id
+                ))
+                
+                processed_pairs.add(pair_id)
+    
+    logger.info(f"Found {len(suggestions)} fuzzy duplicate suggestions")
+    return suggestions
+
+
+class ScanProfilesRequest(BaseModel):
+    contact_ids: Optional[List[str]] = None
+
+async def process_profile_scan(contact_ids: List[str], org_id: str, raw_token: str):
+    """
+    Background task to scan services and enrich profiles using PARALLEL processing.
+    Processes multiple contacts concurrently for massive performance improvement.
+    """
+    
+    logger.info(f"Starting PARALLEL Profile Scan for {len(contact_ids)} contacts...")
+    
+    # Update Status
+    SCAN_JOB_STATUS["is_running"] = True
+    SCAN_JOB_STATUS["total"] = len(contact_ids)
+    SCAN_JOB_STATUS["processed"] = 0
+    SCAN_JOB_STATUS["status"] = "running"
+    SCAN_JOB_STATUS["errors"] = []  # Track errors for reporting
+    
+    # We use Service Role for reliability in background
+    try:
+        client = get_service_role_client()
+    except Exception as e:
+        logger.error(f"Failed to init client for background scan: {e}", exc_info=True)
+        SCAN_JOB_STATUS["is_running"] = False
+        SCAN_JOB_STATUS["status"] = "failed"
+        SCAN_JOB_STATUS["errors"].append(str(e))
+        return
+
+    async def process_single_contact(cid: str, index: int):
+        """
+        Process a single contact's profile enrichment.
+        Returns (success: bool, contact_id: str, error: str|None)
+        """
+        target_user_id = None
+        contact_name = "Unknown"
+        
+        try:
+            # 1. Fetch Contact Name & Services & User ID
+            c_res = client.table("contacts").select("name, user_id").eq("id", cid).single().execute()
+            if not c_res.data:
+                logger.warning(f"Contact {cid} not found, skipping")
+                return (False, cid, "Contact not found")
+                
+            contact_name = c_res.data["name"]
+            target_user_id = c_res.data["user_id"]
+
+            s_res = client.table("services").select("type, description").eq("contact_id", cid).execute()
+            if not s_res.data:
+                logger.info(f"No services for {contact_name}, skipping enrichment")
+                return (False, cid, "No services to enrich from")
+            
+            services_text = [f"[{s['type'].upper()}] {s['description']}" for s in s_res.data]
+            
+            # 2. Run LLM Enrichment (this is the slow I/O operation)
+            profile = await enrich_profile_from_services_with_llm(contact_name, services_text)
+            
+            # 3. Save / Upsert Profile
+            existing_prof = client.table("contact_profiles").select("*").eq("contact_id", cid).execute()
+            provenance = {}
+            if existing_prof.data:
+                provenance = existing_prof.data[0].get("field_provenance") or {}
+            
+            updates = {}
+            new_provenance = provenance.copy()
+            
+            def update_if_allowed(field_key, new_value):
+                if new_value is None: return
+                if isinstance(new_value, list) and not new_value: return
+                # Check provenance - User Verified trumps AI
+                if provenance.get(field_key) == "user_verified": return
+                updates[field_key] = new_value
+                new_provenance[field_key] = "ai_generated"
+
+            # Core Rich fields
+            update_if_allowed("bio", profile.message_to_world)
+            update_if_allowed("hot_plate", profile.hot_plate)
+            update_if_allowed("role_tags", profile.role_tags)
+            update_if_allowed("communities", profile.communities)
+            update_if_allowed("asset_classes", profile.asset_classes)
+            update_if_allowed("i_can_help_with", profile.i_can_help_with)
+            update_if_allowed("help_me_with", profile.help_me_with)
+            
+            # Buy Box (JSON)
+            if profile.buy_box:
+                 if provenance.get("buy_box") != "user_verified":
+                     updates["buy_box"] = profile.buy_box.model_dump()
+                     new_provenance["buy_box"] = "ai_generated"
+
+            if updates:
+                updates["field_provenance"] = new_provenance
+                updates["updated_at"] = datetime.datetime.now().isoformat()
+                
+                # Check if insert or update
+                if existing_prof.data:
+                    client.table("contact_profiles").update(updates).eq("contact_id", cid).execute()
+                else:
+                    updates["contact_id"] = cid
+                    if target_user_id:
+                        updates["user_id"] = target_user_id
+                    client.table("contact_profiles").insert(updates).execute()
+                
+                logger.info(f"✓ Updated profile for {contact_name} ({cid})")
+                return (True, cid, None)
+            else:
+                logger.info(f"No updates needed for {contact_name}")
+                return (True, cid, None)
+                
+        except Exception as e:
+            error_msg = f"Error scanning profile for {contact_name} ({cid}): {e}"
+            logger.error(error_msg, exc_info=True)
+            return (False, cid, str(e))
+    
+    # Process contacts in parallel with rate limiting
+    # Process in batches to avoid overwhelming LLM API
+    BATCH_SIZE = 10  # Process 10 contacts concurrently at a time
+    total_processed = 0
+    total_success = 0
+    total_errors = 0
+    
+    for batch_start in range(0, len(contact_ids), BATCH_SIZE):
+        batch_end = min(batch_start + BATCH_SIZE, len(contact_ids))
+        batch = contact_ids[batch_start:batch_end]
+        
+        logger.info(f"Processing batch {batch_start//BATCH_SIZE + 1}: contacts {batch_start + 1}-{batch_end} of {len(contact_ids)}")
+        
+        # Create tasks for this batch
+        tasks = [process_single_contact(cid, i) for i, cid in enumerate(batch, start=batch_start)]
+        
+        # Execute batch in parallel
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+        
+        # Process results
+        for result in results:
+            total_processed += 1
+            SCAN_JOB_STATUS["processed"] = total_processed
+            
+            if isinstance(result, Exception):
+                total_errors += 1
+                error_msg = f"Task raised exception: {result}"
+                logger.error(error_msg)
+                SCAN_JOB_STATUS["errors"].append(error_msg)
+            elif result:
+                success, cid, error = result
+                if success:
+                    total_success += 1
+                else:
+                    total_errors += 1
+                    if error:
+                        SCAN_JOB_STATUS["errors"].append(f"{cid}: {error}")
+
+    logger.info(
+        f"Profile Scan Complete: {total_success} successful, {total_errors} errors, "
+        f"{total_processed} total"
+    )
+    SCAN_JOB_STATUS["is_running"] = False
+    SCAN_JOB_STATUS["status"] = "completed" if total_errors == 0 else "completed_with_errors"
+    SCAN_JOB_STATUS["success_count"] = total_success
+    SCAN_JOB_STATUS["error_count"] = total_errors
+
+@router.get("/scan-status")
+def get_scan_status(ctx: UserContext = Depends(require_admin)):
+    """Return the current status of the profile scan job."""
+    return SCAN_JOB_STATUS
+
+
+
+@router.post("/scan-profiles")
+async def scan_profiles(
+    background_tasks: BackgroundTasks,
+    payload: ScanProfilesRequest = Body(...),
+    ctx: UserContext = Depends(require_admin),
+    client: Client = Depends(get_supabase_client),
+    token_auth: Any = Depends(require_admin) # Just to ensure admin auth, but we need raw token maybe?
+):
+    """
+    Trigger AI analysis of services to populate rich profiles.
+    If contact_ids provided, scans only those.
+    Else, scans ALL contacts in org.
+    """
+    targets = []
+    if payload.contact_ids:
+        targets = payload.contact_ids
+    else:
+        # Fetch ALL contacts IDs
+        # Warning: This could be large. Pagination?
+        # For now, fetch IDs only.
+        res = client.table("contacts").select("id").eq("org_id", ctx.org_id).execute()
+        if res.data:
+            targets = [c['id'] for c in res.data]
+    
+    if not targets:
+        return {"message": "No contacts to scan."}
+
+    # Pass raw token if we need it, but we use Service Key in Background typically
+    # We'll pass a placeholder or the token from context if we can access it.
+    # We don't have easy access to raw token here without `HTTPBearer` depends returning it.
+    # But `process_profile_scan` handles Service Key fallback.
+    
+    background_tasks.add_task(process_profile_scan, targets, ctx.org_id, "background_token")
+    
+    return {"message": f"Started profile scan for {len(targets)} contacts."}
+
 
 @router.post("/contacts/merge", response_model=dict)
 def merge_contacts(
@@ -260,7 +567,81 @@ def merge_contacts(
     except Exception:
         pass
     
-    return {"status": "success", "message": f"Merged {len(dup_ids)} contacts"}
+    return {"status": "success", "merged_id": primary_id, "deleted_ids": dup_ids}
+
+class ReprocessRequest(BaseModel):
+    chat_id: Optional[str] = None
+    all_chats: Optional[bool] = False
+
+@router.post("/reprocess_chats", response_model=dict)
+async def reprocess_chats(
+    request: ReprocessRequest,
+    background_tasks: BackgroundTasks,
+    ctx: UserContext = Depends(require_admin),
+    client: Client = Depends(get_supabase_client)
+):
+    """
+    Trigger re-extraction for one or all meeting chats.
+    Uses the new run_core_extraction_logic via background task.
+    """
+    from app.api.upload import run_core_extraction_logic
+    import asyncio
+
+    # Helper wrapper for background task
+    async def _reprocess_single(cid, uid, oid, text):
+        try:
+            # We need a fresh client for background task if possible, 
+            # but since we are admin here, passing the current client *might* work 
+            # if we trust it doesn't expire immediately. 
+            # Safer to just pass the client we have or create new one.
+            # Let's rely on the fact we are admin and just run the logic.
+            # Note: run_core_extraction_logic is async.
+            
+            # Since background_tasks.add_task expects a function, we define this wrapper.
+            await run_core_extraction_logic(client, cid, uid, oid, text)
+        except Exception as e:
+            print(f"Reprocess failed for {cid}: {e}")
+
+    # Fetch chats
+    query = client.table("meeting_chats").select("id, user_id, org_id, cleaned_text").eq("org_id", ctx.org_id)
+    
+    if request.chat_id:
+        query = query.eq("id", request.chat_id)
+    
+    # If all_chats is false and no chat_id, error
+    if not request.chat_id and not request.all_chats:
+         raise HTTPException(status_code=400, detail="Must specify chat_id or all_chats=True")
+
+    res = query.execute()
+    chats = res.data
+    
+    if not chats:
+        return {"status": "success", "message": "No chats found to reprocess."}
+
+    # Schedule tasks
+    count = 0
+    for chat in chats:
+        # We use background_tasks to schedule the execution
+        # But wait... background tokens.
+        # Ideally we pass a fresh client creation inside the task. 
+        # For simplicity in this quick implementation, we will define a standalone background func.
+        
+        # We will reuse process_extraction_background from upload.py if we have the token
+        # But we don't have the raw token here easily unless we pass it.
+        # Let's import the wrapper from upload.py and use it if possible, 
+        # or just define a specific one here.
+        
+        # Actually, let's just run `run_core_extraction_logic` directly in a loop 
+        # if the user asks for *one*. If *all*, we should queue them.
+        
+        # For robustness, let's just queue `process_extraction_background` logic 
+        # but we need to mock the token.
+        # Alternate: Just run `run_core_extraction_logic` with the Admin Client.
+        
+        background_tasks.add_task(run_core_extraction_logic, client, chat['id'], chat['user_id'], chat['org_id'], chat['cleaned_text'])
+        count += 1
+        
+    return {"status": "success", "queued": count, "message": f"Queued {count} chats for reprocessing."}
 
 @router.patch("/contacts/{contact_id}", response_model=dict)
 def update_contact(
@@ -273,13 +654,38 @@ def update_contact(
     Directly update a contact's fields (Admin only).
     """
     # Safe fields only
-    allowed = {"name", "email", "phone", "links"} 
-    update_data = {k: v for k, v in payload.items() if k in allowed}
+    allowed = {"name", "email", "phone", "links", "profile"} 
     
-    if not update_data:
+    # Split updates
+    contact_updates = {}
+    profile_updates = None
+    
+    for k, v in payload.items():
+        if k == "profile":
+            profile_updates = v
+        elif k in allowed:
+            contact_updates[k] = v
+
+    if not contact_updates and not profile_updates:
         raise HTTPException(status_code=400, detail="No valid fields to update")
         
-    client.table("contacts").update(update_data).eq("id", contact_id).execute()
+    if contact_updates:
+        client.table("contacts").update(contact_updates).eq("id", contact_id).execute()
+        
+    if profile_updates:
+        # Check if profile exists
+        res = client.table("contact_profiles").select("id").eq("contact_id", contact_id).execute()
+        if res.data:
+            # Update
+            client.table("contact_profiles").update(profile_updates).eq("contact_id", contact_id).execute()
+        else:
+            # Insert - need user_id from contact
+            contact_res = client.table("contacts").select("user_id").eq("id", contact_id).single().execute()
+            if contact_res.data:
+                profile_updates["contact_id"] = contact_id
+                profile_updates["user_id"] = contact_res.data["user_id"]
+                client.table("contact_profiles").insert(profile_updates).execute()
+            
     return {"status": "success"}
 
 @router.delete("/contacts/{contact_id}", response_model=dict)

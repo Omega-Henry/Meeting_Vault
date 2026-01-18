@@ -14,22 +14,30 @@ export default function ServicesTable() {
 
     useEffect(() => {
         const fetchServices = async () => {
-            let query = supabase
-                .from('services')
-                .select('*, contacts(name, email), meeting_chats(meeting_name)')
-                .order('created_at', { ascending: false })
+            const { data: { session } } = await supabase.auth.getSession()
+            if (!session) return
 
+            let url = `${import.meta.env.VITE_API_BASE_URL || ''}/api/directory/services?limit=100`
             if (filter !== 'all') {
-                query = query.eq('type', filter)
+                url += `&type=${filter}`
             }
-
             if (contactId) {
-                query = query.eq('contact_id', contactId)
+                url += `&contact_id=${contactId}`
             }
 
-            const { data } = await query
-            if (data) setServices(data)
-            setLoading(false)
+            try {
+                const res = await fetch(url, {
+                    headers: { 'Authorization': `Bearer ${session.access_token}` }
+                })
+                if (res.ok) {
+                    const data = await res.json()
+                    setServices(data)
+                }
+            } catch (err) {
+                console.error("Failed to fetch services", err)
+            } finally {
+                setLoading(false)
+            }
         }
 
         fetchServices()

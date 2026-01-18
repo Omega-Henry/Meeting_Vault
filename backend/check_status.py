@@ -24,25 +24,22 @@ if not url or not key:
 print(f"Connecting to {url}")
 client = create_client(url, key)
 
-def check_latest_chat():
-    res = client.table("meeting_chats").select("*").order("created_at", desc=True).limit(1).execute()
-    if not res.data:
-        print("No chats found.")
-        return
-
-    chat = res.data[0]
-    print(f"Latest Chat ID: {chat['id']}")
-    print(f"Name: {chat['meeting_name']}")
-    print(f"Created At: {chat['created_at']}")
-    print(f"Digest Bullets: {chat.get('digest_bullets')}")
+def check_stuck_chats():
+    print("Checking for STUCK chats...")
+    # Fetch all chats (limit 50)
+    res = client.table("meeting_chats").select("*").order("created_at", desc=True).limit(50).execute()
     
-    summary = chat.get('digest_bullets', {}).get('summary')
-    print(f"Summary Field: '{summary}'")
+    stuck_count = 0
+    if res.data:
+        for chat in res.data:
+            summary = chat.get('digest_bullets', {}).get('summary')
+            if summary == 'Processing...':
+                print(f"[STUCK] ID: {chat['id']} | Name: {chat['meeting_name']} | Created: {chat['created_at']}")
+                stuck_count += 1
+            else:
+                 pass # print(f"[DONE] {chat['meeting_name']}: {summary[:20]}...")
 
-    if summary == "Processing...":
-        print("STATUS: STUCK IN PROCESSING")
-    else:
-        print("STATUS: DONE (or failed with message)")
+    print(f"Total Stuck Chats: {stuck_count}")
 
 if __name__ == "__main__":
-    check_latest_chat()
+    check_stuck_chats()

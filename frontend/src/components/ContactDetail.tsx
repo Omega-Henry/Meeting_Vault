@@ -1,4 +1,4 @@
-import { ExternalLink, Mail, Phone, Building, Globe, Copy, Check, X, Briefcase } from "lucide-react"
+import { ExternalLink, Mail, Phone, Building, Globe, Copy, Check, X, Briefcase, Trash2 } from "lucide-react"
 import { useState, useEffect } from "react"
 import { supabase } from "../lib/supabase"
 import clsx from "clsx"
@@ -8,10 +8,132 @@ interface ContactDetailProps {
     isOpen: boolean
     onClose: () => void
     editable?: boolean
+    onDelete?: () => void  // Callback after successful deletion
 }
 
-export function ContactDetail({ contact, isOpen, onClose, editable }: ContactDetailProps) {
+export function ContactDetail({ contact, isOpen, onClose, editable, onDelete }: ContactDetailProps) {
     const [activeTab, setActiveTab] = useState('profile')
+    const [deleting, setDeleting] = useState(false)
+    const [editing, setEditing] = useState(false)
+    const [editForm, setEditForm] = useState<any>({})
+
+    // Helper to safely get profile object
+    const getProfile = (c: any) => {
+        if (!c?.profile) return {}
+        return Array.isArray(c.profile) ? c.profile[0] || {} : c.profile
+    }
+
+    // Initialize form when opening edit mode
+    useEffect(() => {
+        if (editing && contact) {
+            const profile = getProfile(contact)
+            setEditForm({
+                name: contact.name,
+                email: contact.email,
+                phone: contact.phone,
+                ...profile,
+                // Flatten arrays for text input (comma separated)
+                communities: profile.communities?.join(', '),
+                assets: profile.assets?.join(', '),
+                role_tags: profile.role_tags?.join(', '),
+                buy_box_min: profile.buy_box?.min_price,
+                buy_box_max: profile.buy_box?.max_price,
+                buy_box_desc: profile.buy_box?.description
+            })
+        }
+    }, [editing, contact])
+
+    const handleSaveProfile = async () => {
+        try {
+            const { data: { session } } = await supabase.auth.getSession()
+            if (!session) return
+
+            const currentProfile = getProfile(contact)
+
+            // Prepare payload
+            const payload = {
+                name: editForm.name,
+                email: editForm.email,
+                phone: editForm.phone,
+                profile: {
+                    ...currentProfile, // keep existing fields not in form
+                    bio: editForm.bio,
+                    hot_plate: editForm.hot_plate,
+                    i_can_help_with: editForm.i_can_help_with,
+                    help_me_with: editForm.help_me_with,
+                    message_to_world: editForm.message_to_world,
+                    blinq: editForm.blinq,
+                    website: editForm.website,
+
+                    // Parse lists
+                    communities: editForm.communities?.split(',').map((s: string) => s.trim()).filter(Boolean),
+                    assets: editForm.assets?.split(',').map((s: string) => s.trim()).filter(Boolean),
+                    role_tags: editForm.role_tags?.split(',').map((s: string) => s.trim()).filter(Boolean),
+
+                    // Reconstruct Buy Box
+                    buy_box: {
+                        ...(currentProfile.buy_box || {}),
+                        min_price: editForm.buy_box_min ? Number(editForm.buy_box_min) : null,
+                        max_price: editForm.buy_box_max ? Number(editForm.buy_box_max) : null,
+                        description: editForm.buy_box_desc
+                    },
+
+                    // Mark edited fields as user_verified
+                    field_provenance: {
+                        ...(currentProfile.field_provenance || {}),
+                        hot_plate: 'user_verified',
+                        bio: 'user_verified',
+                        communities: 'user_verified',
+                        assets: 'user_verified',
+                        buy_box: 'user_verified'
+                    }
+                }
+            }
+
+            // Hit API
+            // Assumption: API supports PATCH /api/contacts/:id
+            const res = await fetch(`${import.meta.env.VITE_API_BASE_URL || ''}/api/contacts/${contact.id}`, {
+                method: 'PATCH',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${session.access_token}`
+                },
+                body: JSON.stringify(payload)
+            })
+
+            if (!res.ok) throw new Error("Failed to update")
+
+            setEditing(false)
+            onClose() // simpler reload
+            // In a perfect world we'd update locally, but this ensures fresh sync
+
+        } catch (e) {
+            console.error(e)
+            alert("Failed to save profile")
+        }
+    }
+
+    const handleDelete = async () => {
+        if (!confirm(`Are you sure you want to delete ${contact.name}? This will also delete all their services.`)) return
+
+        setDeleting(true)
+        try {
+            const { error } = await supabase
+                .from('contacts')
+                .delete()
+                .eq('id', contact.id)
+
+            if (error) throw error
+
+            onClose()
+            onDelete?.()
+        } catch (e) {
+            console.error(e)
+            alert('Failed to delete contact')
+        } finally {
+            setDeleting(false)
+        }
+    }
 
     // Lock body scroll when open
     useEffect(() => {
@@ -25,7 +147,7 @@ export function ContactDetail({ contact, isOpen, onClose, editable }: ContactDet
 
     if (!contact || !isOpen) return null
 
-    const profile = contact.profile || {}
+    const profile = getProfile(contact)
     const services = contact.services || []
 
     return (
@@ -35,14 +157,32 @@ export function ContactDetail({ contact, isOpen, onClose, editable }: ContactDet
 
             {/* Modal Content */}
             <div className="relative z-50 w-full max-w-2xl bg-card border border-border rounded-lg shadow-lg flex flex-col max-h-[90vh] overflow-hidden">
-                {/* Header */}
-                <div className="p-6 border-b border-border bg-muted/10 shrink-0">
+                {/* Header Actions */}
+                <div className="p-6 border-b border-border bg-muted/10 shrink-0 relative">
+                    <div className="absolute top-4 right-12 flex gap-2">
+                        {editable && !editing && (
+                            <button onClick={() => setEditing(true)} className="px-3 py-1 text-xs font-medium bg-primary text-primary-foreground rounded hover:bg-primary/90">
+                                Edit Profile
+                            </button>
+                        )}
+                        {editable && editing && (
+                            <div className="flex gap-2">
+                                <button onClick={() => setEditing(false)} className="px-3 py-1 text-xs font-medium bg-secondary text-secondary-foreground rounded hover:bg-secondary/80">
+                                    Cancel
+                                </button>
+                                <button onClick={handleSaveProfile} className="px-3 py-1 text-xs font-medium bg-green-600 text-white rounded hover:bg-green-700">
+                                    Save
+                                </button>
+                            </div>
+                        )}
+                    </div>
                     <button onClick={onClose} className="absolute right-4 top-4 rounded-sm opacity-70 ring-offset-background transition-opacity hover:opacity-100">
                         <X className="h-4 w-4" />
                         <span className="sr-only">Close</span>
                     </button>
 
                     <div className="flex items-start gap-4 pr-6">
+                        {/* Avatar */}
                         <div className="h-16 w-16 rounded-full bg-muted overflow-hidden shrink-0 border-2 border-background shadow-sm flex items-center justify-center">
                             {profile.avatar_url ? (
                                 <img src={profile.avatar_url} alt="" className="h-full w-full object-cover" />
@@ -52,24 +192,42 @@ export function ContactDetail({ contact, isOpen, onClose, editable }: ContactDet
                                 </div>
                             )}
                         </div>
+
+                        {/* Name & Bio */}
                         <div className="flex-1">
-                            <h2 className="text-2xl font-bold tracking-tight">{contact.name}</h2>
-                            <div className="mt-1 flex flex-col gap-1 text-sm text-muted-foreground">
-                                {profile.bio ? (
-                                    <span>{profile.bio}</span>
-                                ) : (
-                                    <span className="italic">No bio available</span>
-                                )}
-                                <div className="flex gap-2 mt-2">
-                                    {contact.is_unverified && (
-                                        <span className="inline-flex items-center rounded-full border border-destructive/50 px-2.5 py-0.5 text-xs font-semibold transition-colors focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 bg-destructive/10 text-destructive">
-                                            Unverified
-                                        </span>
-                                    )}
+                            {editing ? (
+                                <div className="space-y-2">
+                                    <input className="w-full text-xl font-bold bg-background border rounded px-2 py-1" value={editForm.name} onChange={e => setEditForm({ ...editForm, name: e.target.value })} placeholder="Name" />
+                                    <textarea className="w-full text-sm bg-background border rounded px-2 py-1 min-h-[60px]" value={editForm.bio || ''} onChange={e => setEditForm({ ...editForm, bio: e.target.value })} placeholder="Bio/Message to World" />
                                 </div>
-                            </div>
+                            ) : (
+                                <>
+                                    <h2 className="text-2xl font-bold tracking-tight">{contact.name}</h2>
+                                    <div className="mt-1 flex flex-col gap-1 text-sm text-muted-foreground">
+                                        {profile.bio ? <span>{profile.bio}</span> : <span className="italic">No bio available</span>}
+                                        <div className="flex gap-2 mt-2">
+                                            {contact.is_unverified && (
+                                                <span className="inline-flex items-center rounded-full border border-destructive/50 px-2.5 py-0.5 text-xs font-semibold bg-destructive/10 text-destructive">
+                                                    Unverified
+                                                </span>
+                                            )}
+                                        </div>
+                                    </div>
+                                </>
+                            )}
                         </div>
                     </div>
+                    {/* Delete Button for Admins (only show if not editing to avoid clutter) */}
+                    {editable && !editing && (
+                        <button
+                            onClick={handleDelete}
+                            disabled={deleting}
+                            className="mt-4 flex items-center text-destructive hover:bg-destructive/10 px-3 py-1.5 rounded-md text-sm transition-colors disabled:opacity-50"
+                        >
+                            <Trash2 className="h-4 w-4 mr-2" />
+                            {deleting ? 'Deleting...' : 'Delete Contact'}
+                        </button>
+                    )}
                 </div>
 
                 {/* Tabs Header */}
@@ -100,15 +258,117 @@ export function ContactDetail({ contact, isOpen, onClose, editable }: ContactDet
                 {/* Tab Content */}
                 <div className="flex-1 overflow-y-auto p-6 bg-background">
                     {activeTab === 'profile' && (
-                        <div className="space-y-1">
-                            <Field label="Email" value={contact.email} icon={Mail} provenance={profile.field_provenance?.email} />
-                            <Field label="Phone" value={contact.phone} icon={Phone} provenance={profile.field_provenance?.phone} />
-                            {contact.links?.map((link: string, i: number) => (
-                                <Field key={i} label="Link" value={link} icon={Globe} />
-                            ))}
-                            <Field label="Assets" value={profile.assets?.join(', ')} icon={Building} />
-                            <Field label="Buy Box" value={profile.buy_box ? JSON.stringify(profile.buy_box) : null} icon={Briefcase} />
-                        </div>
+                        editing ? (
+                            <div className="space-y-6">
+                                {/* Basic Info Section */}
+                                <div className="space-y-3">
+                                    <h3 className="text-sm font-semibold text-foreground border-b pb-1">Basic Details</h3>
+                                    <div className="grid grid-cols-2 gap-4">
+                                        <EditField label="Email" value={editForm.email} onChange={v => setEditForm({ ...editForm, email: v })} />
+                                        <EditField label="Phone" value={editForm.phone} onChange={v => setEditForm({ ...editForm, phone: v })} />
+                                    </div>
+                                </div>
+
+                                {/* Needs / Haves Section */}
+                                <div className="space-y-3">
+                                    <h3 className="text-sm font-semibold text-foreground border-b pb-1">I Can Help With...</h3>
+                                    <EditField label="Hot Plate (Current Focus)" value={editForm.hot_plate} onChange={v => setEditForm({ ...editForm, hot_plate: v })} />
+                                    <div className="grid grid-cols-2 gap-4">
+                                        <EditField label="I can help with" value={editForm.i_can_help_with} onChange={v => setEditForm({ ...editForm, i_can_help_with: v })} />
+                                        <EditField label="Help me with" value={editForm.help_me_with} onChange={v => setEditForm({ ...editForm, help_me_with: v })} />
+                                    </div>
+                                </div>
+
+                                {/* Tags Section */}
+                                <div className="space-y-3">
+                                    <h3 className="text-sm font-semibold text-foreground border-b pb-1">Tags & Communities</h3>
+                                    <EditField label="Communities (comma separated)" value={editForm.communities} onChange={v => setEditForm({ ...editForm, communities: v })} />
+                                    <div className="grid grid-cols-2 gap-4">
+                                        <EditField label="Role Tags" value={editForm.role_tags} onChange={v => setEditForm({ ...editForm, role_tags: v })} />
+                                        <EditField label="Asset Classes" value={editForm.assets} onChange={v => setEditForm({ ...editForm, assets: v })} />
+                                    </div>
+                                </div>
+
+                                {/* Buy Box Section */}
+                                <div className="p-4 border rounded-md bg-muted/20 space-y-3">
+                                    <h3 className="text-sm font-bold uppercase text-muted-foreground flex items-center gap-2">Buy Box Details</h3>
+                                    <div className="grid grid-cols-2 gap-4">
+                                        <div>
+                                            <label className="text-xs font-medium text-muted-foreground">Min Price</label>
+                                            <input className="w-full border rounded px-2 py-1.5 text-sm mt-1" type="number" placeholder="0" value={editForm.buy_box_min || ''} onChange={e => setEditForm({ ...editForm, buy_box_min: e.target.value })} />
+                                        </div>
+                                        <div>
+                                            <label className="text-xs font-medium text-muted-foreground">Max Price</label>
+                                            <input className="w-full border rounded px-2 py-1.5 text-sm mt-1" type="number" placeholder="No Limit" value={editForm.buy_box_max || ''} onChange={e => setEditForm({ ...editForm, buy_box_max: e.target.value })} />
+                                        </div>
+                                    </div>
+                                    <div>
+                                        <label className="text-xs font-medium text-muted-foreground">Strategy / Description</label>
+                                        <textarea className="w-full border rounded px-2 py-1.5 text-sm mt-1 min-h-[60px]" placeholder="Specific buy criteria..." value={editForm.buy_box_desc || ''} onChange={e => setEditForm({ ...editForm, buy_box_desc: e.target.value })} />
+                                    </div>
+                                </div>
+
+                                {/* Links Section */}
+                                <div className="space-y-3">
+                                    <h3 className="text-sm font-semibold text-foreground border-b pb-1">Links</h3>
+                                    <div className="grid grid-cols-2 gap-4">
+                                        <EditField label="Blinq URL" value={editForm.blinq} onChange={v => setEditForm({ ...editForm, blinq: v })} />
+                                        <EditField label="Website" value={editForm.website} onChange={v => setEditForm({ ...editForm, website: v })} />
+                                    </div>
+                                </div>
+                            </div>
+                        ) : (
+                            <div className="space-y-1">
+                                <Field label="Email" value={contact.email} icon={Mail} provenance={profile.field_provenance?.email} />
+                                <Field label="Phone" value={contact.phone} icon={Phone} provenance={profile.field_provenance?.phone} />
+
+                                {/* Rich Fields */}
+                                <Field label="Hot Plate" value={profile.hot_plate} icon={Briefcase} provenance={profile.field_provenance?.hot_plate} />
+                                <Field label="Bio / Message" value={profile.message_to_world || profile.bio} icon={null} provenance={profile.field_provenance?.message_to_world} />
+
+                                <div className="grid grid-cols-2 gap-4">
+                                    <Field label="I can help with" value={profile.i_can_help_with} icon={Check} provenance={profile.field_provenance?.i_can_help_with} />
+                                    <Field label="Help me with" value={profile.help_me_with} icon={Briefcase} provenance={profile.field_provenance?.help_me_with} />
+                                </div>
+
+                                <Field label="Communities" value={profile.communities?.join(', ')} icon={Globe} provenance={profile.field_provenance?.communities} />
+                                <Field label="Role Tags" value={profile.role_tags?.join(', ')} icon={null} provenance={profile.field_provenance?.role_tags} />
+                                <Field label="Asset Classes" value={profile.assets?.join(', ')} icon={Building} provenance={profile.field_provenance?.assets} />
+
+                                {/* Buy Box Detail */}
+                                {profile.buy_box && (
+                                    <div className="py-3 border-b border-border/50">
+                                        <p className="text-xs text-muted-foreground font-medium uppercase tracking-wider mb-1 flex items-center gap-2">
+                                            Buy Box
+                                            {profile.field_provenance?.buy_box === 'ai_generated' && <span className="text-[10px] bg-muted px-1.5 rounded-full">✨ AI</span>}
+                                        </p>
+                                        <div className="bg-muted/30 p-3 rounded-md text-sm space-y-1">
+                                            {profile.buy_box.min_price && <div className="flex justify-between"><span className="text-muted-foreground">Min Price:</span> <span>${profile.buy_box.min_price.toLocaleString()}</span></div>}
+                                            {profile.buy_box.max_price && <div className="flex justify-between"><span className="text-muted-foreground">Max Price:</span> <span>${profile.buy_box.max_price.toLocaleString()}</span></div>}
+                                            {profile.buy_box.markets?.length > 0 && <div><span className="text-muted-foreground">Markets:</span> {profile.buy_box.markets.join(', ')}</div>}
+                                            {profile.buy_box.strategy?.length > 0 && <div><span className="text-muted-foreground">Strategy:</span> {profile.buy_box.strategy.join(', ')}</div>}
+                                            {profile.buy_box.description && <div className="mt-2 text-muted-foreground italic">"{profile.buy_box.description}"</div>}
+                                        </div>
+                                    </div>
+                                )}
+
+                                {/* Links */}
+                                {(contact.links?.length > 0 || profile.blinq || profile.website || profile.social_media) && (
+                                    <div className="py-3">
+                                        <p className="text-xs text-muted-foreground font-medium uppercase tracking-wider mb-2">Links</p>
+                                        <div className="flex flex-wrap gap-2">
+                                            {profile.blinq && <a href={profile.blinq} target="_blank" rel="noopener" className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-secondary/50 text-secondary-foreground text-sm hover:bg-secondary"><ExternalLink className="h-3 w-3" /> Blinq</a>}
+                                            {profile.website && <a href={profile.website} target="_blank" rel="noopener" className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-secondary/50 text-secondary-foreground text-sm hover:bg-secondary"><Globe className="h-3 w-3" /> Website</a>}
+
+                                            {/* Generic links from contact.links */}
+                                            {contact.links?.map((link: string, i: number) => (
+                                                <a key={i} href={link} target="_blank" rel="noopener" className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-secondary/50 text-secondary-foreground text-sm hover:bg-secondary truncate max-w-[200px]"><ExternalLink className="h-3 w-3" /> Link {i + 1}</a>
+                                            ))}
+                                        </div>
+                                    </div>
+                                )}
+                            </div>
+                        )
                     )}
 
                     {(activeTab === 'offers' || activeTab === 'requests') && (
@@ -276,5 +536,18 @@ function AddServiceForm({ contactId, type, onSuccess }: { contactId: string, typ
                 </button>
             </div>
         </form>
+    )
+}
+
+function EditField({ label, value, onChange }: { label: string, value: string, onChange: (v: string) => void }) {
+    return (
+        <div>
+            <label className="text-xs font-medium text-muted-foreground">{label}</label>
+            <input
+                className="w-full border rounded px-2 py-1.5 text-sm bg-background mt-1 focus:ring-2 focus:ring-primary/20"
+                value={value || ''}
+                onChange={e => onChange(e.target.value)}
+            />
+        </div>
     )
 }

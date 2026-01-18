@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { supabase } from '../../lib/supabase'
-import { Search, Users } from 'lucide-react'
+import { Search, Users, Trash2, X, AlertTriangle } from 'lucide-react'
 import { ContactCard } from '../../components/ContactCard'
 import { ContactDetail } from '../../components/ContactDetail'
 
@@ -12,6 +12,10 @@ export default function AdminDirectory() {
     // Modal State
     const [detailOpen, setDetailOpen] = useState(false)
     const [selectedContact, setSelectedContact] = useState<any>(null)
+
+    // Bulk Selection State
+    const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
+    const [deleting, setDeleting] = useState(false)
 
     useEffect(() => {
         const timer = setTimeout(() => {
@@ -39,7 +43,6 @@ export default function AdminDirectory() {
 
             if (res.ok) {
                 const data = await res.json()
-                // Normalize profile if array
                 const cleaned = data.map((c: any) => ({
                     ...c,
                     profile: Array.isArray(c.profile) ? c.profile[0] : c.profile
@@ -56,6 +59,61 @@ export default function AdminDirectory() {
     const openDetail = (contact: any) => {
         setSelectedContact(contact)
         setDetailOpen(true)
+    }
+
+    const toggleSelect = (id: string) => {
+        const newSelected = new Set(selectedIds)
+        if (newSelected.has(id)) {
+            newSelected.delete(id)
+        } else {
+            newSelected.add(id)
+        }
+        setSelectedIds(newSelected)
+    }
+
+    const clearSelection = () => {
+        setSelectedIds(new Set())
+    }
+
+    const selectAll = () => {
+        setSelectedIds(new Set(contacts.map(c => c.id)))
+    }
+
+    const handleBulkDelete = async () => {
+        // Enhanced warning for bulk delete
+        const warningMessage = selectedIds.size === contacts.length
+            ? `⚠️ WARNING: You are about to delete ALL ${selectedIds.size} contacts!\n\nThis will permanently remove:\n- All selected contacts\n- All their associated services\n- All their profile data\n\nThis action CANNOT be undone.\n\nType "DELETE ALL" to confirm:`
+            : `Are you sure you want to delete ${selectedIds.size} contact${selectedIds.size > 1 ? 's' : ''}?\n\nThis will also delete all their services and cannot be undone.`
+
+        if (selectedIds.size === contacts.length) {
+            const confirmation = prompt(warningMessage)
+            if (confirmation !== 'DELETE ALL') {
+                alert('Deletion cancelled. You must type "DELETE ALL" exactly to confirm.')
+                return
+            }
+        } else {
+            if (!confirm(warningMessage)) {
+                return
+            }
+        }
+
+        setDeleting(true)
+        try {
+            const { error } = await supabase
+                .from('contacts')
+                .delete()
+                .in('id', Array.from(selectedIds))
+
+            if (error) throw error
+
+            setSelectedIds(new Set())
+            fetchContacts()
+        } catch (e) {
+            console.error(e)
+            alert('Failed to delete contacts')
+        } finally {
+            setDeleting(false)
+        }
     }
 
     return (
@@ -78,6 +136,46 @@ export default function AdminDirectory() {
                 </div>
             </div>
 
+            {/* Bulk Actions Bar */}
+            {selectedIds.size > 0 && (
+                <div className="flex items-center justify-between p-3 bg-destructive/10 rounded-lg border border-destructive/30">
+                    <div className="flex items-center gap-2">
+                        <AlertTriangle className="h-4 w-4 text-destructive" />
+                        <span className="text-sm font-medium">
+                            {selectedIds.size} contact{selectedIds.size > 1 ? 's' : ''} selected
+                            {selectedIds.size === contacts.length && (
+                                <span className="ml-1 text-destructive font-bold">(ALL)</span>
+                            )}
+                        </span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                        {selectedIds.size < contacts.length && (
+                            <button
+                                onClick={selectAll}
+                                className="flex items-center gap-1 text-sm text-primary hover:underline px-2 py-1 rounded transition-colors"
+                            >
+                                Select All ({contacts.length})
+                            </button>
+                        )}
+                        <button
+                            onClick={clearSelection}
+                            className="flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground px-2 py-1 rounded transition-colors"
+                        >
+                            <X className="h-4 w-4" />
+                            Clear
+                        </button>
+                        <button
+                            onClick={handleBulkDelete}
+                            disabled={deleting}
+                            className="flex items-center gap-1 text-sm bg-destructive text-destructive-foreground hover:bg-destructive/90 px-3 py-1.5 rounded-md transition-colors disabled:opacity-50"
+                        >
+                            <Trash2 className="h-4 w-4" />
+                            {deleting ? 'Deleting...' : `Delete (${selectedIds.size})`}
+                        </button>
+                    </div>
+                </div>
+            )}
+
             {loading ? (
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
                     {[1, 2, 3, 4, 5, 6, 7, 8].map(i => (
@@ -95,6 +193,9 @@ export default function AdminDirectory() {
                             key={contact.id}
                             contact={contact}
                             onClick={() => openDetail(contact)}
+                            selectable={true}
+                            selected={selectedIds.has(contact.id)}
+                            onSelect={toggleSelect}
                         />
                     ))}
                 </div>
@@ -106,8 +207,11 @@ export default function AdminDirectory() {
                 isOpen={detailOpen}
                 onClose={() => setDetailOpen(false)}
                 editable={true}
+                onDelete={() => {
+                    setDetailOpen(false)
+                    fetchContacts()
+                }}
             />
         </div>
     )
 }
-

@@ -33,6 +33,24 @@ export default function ChatList() {
 
     useEffect(() => {
         fetchChats()
+
+        // Set up polling interval to check for updates (especially for processing chats)
+        const interval = setInterval(() => {
+            // Optimistic check: only fetch if we suspect something is changing?
+            // For now, just simple polling every 5s is fine for MVP.
+            fetchChats()
+        }, 5000)
+
+        const onFocus = () => {
+            fetchChats()
+        }
+
+        window.addEventListener('focus', onFocus)
+
+        return () => {
+            clearInterval(interval)
+            window.removeEventListener('focus', onFocus)
+        }
     }, [])
 
     const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {

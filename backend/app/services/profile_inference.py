@@ -1,15 +1,22 @@
 """
-AI Profile Inference - Pre-fill contact profiles from extracted services.
-This module analyzes a contact's offers/requests to infer profile fields.
+Profile Inference Module
+
+This module analyzes a contact's offers/requests to infer profile fields
+like role tags, asset classes, markets, and price ranges. No LLM calls -
+purely regex and keyword-based extraction.
 """
 import re
 import logging
 from typing import Dict, List, Any, Optional
-from pydantic import BaseModel, Field
-from langchain_openai import ChatOpenAI
+
 from app.core.config import settings
 
 logger = logging.getLogger(__name__)
+
+
+# =============================================================================
+# KEYWORD DICTIONARIES
+# =============================================================================
 
 # Role tag keywords to detect from service descriptions
 ROLE_TAG_KEYWORDS = {
@@ -35,7 +42,14 @@ ASSET_CLASS_KEYWORDS = {
 }
 
 # State codes to detect markets
-STATE_CODES = ['AL', 'AK', 'AZ', 'AR', 'CA', 'CO', 'CT', 'DE', 'FL', 'GA', 'HI', 'ID', 'IL', 'IN', 'IA', 'KS', 'KY', 'LA', 'ME', 'MD', 'MA', 'MI', 'MN', 'MS', 'MO', 'MT', 'NE', 'NV', 'NH', 'NJ', 'NM', 'NY', 'NC', 'ND', 'OH', 'OK', 'OR', 'PA', 'RI', 'SC', 'SD', 'TN', 'TX', 'UT', 'VT', 'VA', 'WA', 'WV', 'WI', 'WY']
+STATE_CODES = [
+    'AL', 'AK', 'AZ', 'AR', 'CA', 'CO', 'CT', 'DE', 'FL', 'GA', 
+    'HI', 'ID', 'IL', 'IN', 'IA', 'KS', 'KY', 'LA', 'ME', 'MD', 
+    'MA', 'MI', 'MN', 'MS', 'MO', 'MT', 'NE', 'NV', 'NH', 'NJ', 
+    'NM', 'NY', 'NC', 'ND', 'OH', 'OK', 'OR', 'PA', 'RI', 'SC', 
+    'SD', 'TN', 'TX', 'UT', 'VT', 'VA', 'WA', 'WV', 'WI', 'WY'
+]
+
 STATE_NAMES = {
     'texas': 'TX', 'florida': 'FL', 'california': 'CA', 'missouri': 'MO',
     'ohio': 'OH', 'georgia': 'GA', 'arizona': 'AZ', 'colorado': 'CO',
@@ -43,6 +57,11 @@ STATE_NAMES = {
     'michigan': 'MI', 'pennsylvania': 'PA', 'nevada': 'NV', 'oklahoma': 'OK',
     'nationwide': 'Nationwide', 'all states': 'Nationwide'
 }
+
+
+# =============================================================================
+# EXTRACTION FUNCTIONS
+# =============================================================================
 
 def extract_role_tags(text: str) -> List[str]:
     """Extract role tags from text based on keyword matching."""
@@ -55,6 +74,7 @@ def extract_role_tags(text: str) -> List[str]:
                 break
     return list(detected)
 
+
 def extract_asset_classes(text: str) -> List[str]:
     """Extract asset classes from text."""
     text_lower = text.lower()
@@ -65,6 +85,7 @@ def extract_asset_classes(text: str) -> List[str]:
                 detected.add(asset)
                 break
     return list(detected)
+
 
 def extract_markets(text: str) -> List[str]:
     """Extract geographic markets (states) from text."""
@@ -84,6 +105,7 @@ def extract_markets(text: str) -> List[str]:
     
     return list(detected)
 
+
 def extract_prices(text: str) -> Dict[str, Optional[float]]:
     """Extract price mentions from text."""
     prices = []
@@ -102,25 +124,24 @@ def extract_prices(text: str) -> Dict[str, Optional[float]]:
             try:
                 num = float(match.replace(',', ''))
                 # Handle k and M suffixes
-                if 'k' in text.lower()[text.lower().find(match):text.lower().find(match)+len(match)+2]:
-                    num *= 1000
-                elif 'm' in text.lower()[text.lower().find(match):text.lower().find(match)+len(match)+2]:
-                    num *= 1000000
+                match_idx = text.lower().find(match)
+                if match_idx >= 0:
+                    suffix_region = text.lower()[match_idx:match_idx + len(match) + 2]
+                    if 'k' in suffix_region:
+                        num *= 1000
+                    elif 'm' in suffix_region:
+                        num *= 1000000
                 prices.append(num)
-            except:
+            except ValueError:
                 pass
     
     if not prices:
         return {'min': None, 'max': None}
     
     return {
-        'min': min(prices) if prices else None,
-        'max': max(prices) if prices else None
+        'min': min(prices),
+        'max': max(prices)
     }
-
-    # Build profile update
-    profile_update = {}
-    field_provenance = {}
 
 def infer_profile_from_services(services: List[Dict[str, Any]], contact_name: str, extracted_roles: List[str] = None) -> Dict[str, Any]:
     """
@@ -139,6 +160,8 @@ def infer_profile_from_services(services: List[Dict[str, Any]], contact_name: st
             offers.append(desc)
         else:
             requests.append(desc)
+    
+    combined_text = ' '.join(all_descriptions)
     
     # Extract fields
     role_tags = extract_role_tags(combined_text)
@@ -225,7 +248,7 @@ def infer_profile_from_services(services: List[Dict[str, Any]], contact_name: st
     return profile_update
 
 
-def update_contact_profile_from_services(client, contact_id: str, services: List[Dict], extracted_roles: List[str] = None) -> bool:
+def update_contact_profile_from_services(client, contact_id: str, user_id: str, services: List[Dict], extracted_roles: List[str] = None) -> bool:
     """
     Updates a contact's profile with AI-inferred data from their services AND explicit roles.
     Only updates fields that are currently empty and marks them as ai_generated.
@@ -269,6 +292,7 @@ def update_contact_profile_from_services(client, contact_id: str, services: List
         else:
             # Create new profile with inferred data
             inferred['contact_id'] = contact_id
+            inferred['user_id'] = user_id
             client.table("contact_profiles").insert(inferred).execute()
             logger.info(f"Created AI-inferred profile for {contact_name}")
             return True

@@ -1,7 +1,7 @@
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { supabase } from '../../lib/supabase'
-import { Loader2, RefreshCcw, Merge, Edit, Trash2 } from 'lucide-react'
+import { Loader2, RefreshCcw, Merge, Edit, Trash2, Bot } from 'lucide-react'
 
 // Types (simplified)
 interface MergeSuggestion {
@@ -20,6 +20,37 @@ export default function DatabaseEditor() {
     const [suggestions, setSuggestions] = useState<MergeSuggestion[]>([])
     const [loadingScan, setLoadingScan] = useState(false)
     const [scanned, setScanned] = useState(false)
+    const [loadingProfileScan, setLoadingProfileScan] = useState(false)
+    const [profileScanTriggered, setProfileScanTriggered] = useState(false)
+    const [scanStatus, setScanStatus] = useState<any>(null)
+
+    // Poll for scan status
+    useEffect(() => {
+        let interval: NodeJS.Timeout
+        if (profileScanTriggered || (scanStatus && scanStatus.is_running)) {
+            interval = setInterval(async () => {
+                const { data: { session } } = await supabase.auth.getSession()
+                if (!session?.access_token) return
+                try {
+                    const res = await fetch(`${import.meta.env.VITE_API_BASE_URL || ''}/api/admin/scan-status`, {
+                        headers: { 'Authorization': `Bearer ${session.access_token}` }
+                    })
+                    if (res.ok) {
+                        const status = await res.json()
+                        setScanStatus(status)
+                        if (status.status === 'completed' || status.status === 'failed') {
+                            setProfileScanTriggered(false)
+                            // Stop polling after a delay to show 'Completed' state
+                            setTimeout(() => setScanStatus(null), 5000)
+                        }
+                    }
+                } catch (e) {
+                    console.error("Poll error", e)
+                }
+            }, 2000)
+        }
+        return () => clearInterval(interval)
+    }, [profileScanTriggered, scanStatus])
 
     // Manual Editor State
     const [searchQuery, setSearchQuery] = useState('')
@@ -47,6 +78,34 @@ export default function DatabaseEditor() {
             setLoadingScan(false)
         }
     }
+
+    const runProfileScan = async () => {
+        setLoadingProfileScan(true)
+        try {
+            const { data: { session } } = await supabase.auth.getSession()
+            const token = session?.access_token
+            const res = await fetch(`${import.meta.env.VITE_API_BASE_URL || ''}/api/admin/scan-profiles`, {
+                method: 'POST',
+                headers: {
+                    'Authorization': `Bearer ${token}`,
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({}) // Scan all
+            })
+            if (res.ok) {
+                setProfileScanTriggered(true)
+                // Polling useEffect will handle status updates
+            } else {
+                alert("Failed to start scan")
+                setLoadingProfileScan(false)
+            }
+        } catch (err) {
+            console.error(err)
+            alert("Error starting scan")
+            setLoadingProfileScan(false)
+        }
+    }
+
 
     const mergeContacts = async (primaryId: string, duplicateIds: string[]) => {
         if (!confirm(`Merging ${duplicateIds.length} contact(s) into ${primaryId}. This cannot be undone. Continue?`)) return
@@ -167,6 +226,29 @@ export default function DatabaseEditor() {
                             {loadingScan ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <RefreshCcw className="mr-2 h-4 w-4" />}
                             {scanned ? "Re-Scan Database" : "Scan for Duplicates"}
                         </button>
+
+                        <div className="h-4"></div>
+
+                        <div className="border-t pt-4">
+                            <h3 className="font-semibold mb-2">Profile Enrichment</h3>
+                            <button
+                                onClick={runProfileScan}
+                                disabled={loadingProfileScan}
+                                className="bg-purple-600 text-white px-4 py-2 rounded flex items-center hover:bg-purple-700 disabled:opacity-50"
+                            >
+                                {loadingProfileScan ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Bot className="mr-2 h-4 w-4" />}
+                                {scanStatus?.is_running
+                                    ? `Scanning... (${scanStatus.processed}/${scanStatus.total})`
+                                    : scanStatus?.status === 'completed'
+                                        ? "Scan Complete!"
+                                        : "Scan Database for Rich Profiles"}
+                            </button>
+
+                            <p className="text-xs text-muted-foreground mt-1">
+                                Uses AI to infer Bio, Hot Plate, and Buy Box from existing services.
+                            </p>
+                        </div>
+
                     </div>
 
                     {suggestions.length === 0 && scanned && !loadingScan && (

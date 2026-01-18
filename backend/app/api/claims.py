@@ -158,28 +158,34 @@ def decide_claim(
         "decision_reason": payload.reason
     }).eq("id", claim_id).execute()
     
-    # If approved, set claimed_by_user_id on contact
+    # If approved, set claimed_by_user_id AND claim_status on contact
     if new_status == "approved":
         client.table("contacts").update({
-            "claimed_by_user_id": claim["user_id"]
+            "claimed_by_user_id": claim["user_id"],
+            "claim_status": "approved"
         }).eq("id", claim["contact_id"]).execute()
         
         # Also ensure a contact_profile exists for this contact
         profile_exists = client.table("contact_profiles").select("contact_id").eq("contact_id", claim["contact_id"]).execute()
         if not profile_exists.data:
+            # Create profile with user_id from the claim
             client.table("contact_profiles").insert({
                 "contact_id": claim["contact_id"],
+                "user_id": claim["user_id"],
                 "field_provenance": {}
             }).execute()
     
-    # Audit log
-    client.table("audit_log").insert({
-        "actor_id": user.id,
-        "action": f"claim_{new_status}",
-        "target_type": "claim_request",
-        "target_id": claim_id,
-        "diff": {"claim_id": claim_id, "contact_id": claim["contact_id"], "reason": payload.reason}
-    }).execute()
+    # Try to audit log (ignore silently if audit_log table doesn't exist)
+    try:
+        client.table("audit_log").insert({
+            "actor_id": user.id,
+            "action": f"claim_{new_status}",
+            "target_type": "claim_request",
+            "target_id": claim_id,
+            "diff": {"claim_id": claim_id, "contact_id": claim["contact_id"], "reason": payload.reason}
+        }).execute()
+    except Exception as e:
+        logger.warning(f"Audit log failed (table may not exist): {e}")
     
     return {"status": "success", "decision": new_status}
 
