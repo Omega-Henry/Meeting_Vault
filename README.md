@@ -65,6 +65,18 @@ The database schema is defined in `schema.sql`. To set up:
 2. Run `schema.sql` in the SQL Editor
 3. Apply migrations in `/backend/migrations/` (if any pending)
 
+### Required Migrations
+
+Run these in Supabase SQL Editor **in order**:
+
+| Migration | Description |
+|-----------|-------------|
+| `007_ai_chat_history.sql` | AI conversation persistence |
+| `008_performance_indexes.sql` | Database performance optimization |
+| `009_fix_rls_policies.sql` | Org-based access control |
+| `010_add_profile_columns.sql` | Rich profile columns (required for profile scan) |
+
+
 ## Key Improvements (Jan 2026)
 
 Recent production-ready enhancements:
