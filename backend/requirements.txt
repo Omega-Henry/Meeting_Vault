@@ -25,3 +25,7 @@ python-json-logger
 
 # Fuzzy matching for duplicate detection
 rapidfuzz
+
+# AI Agent Framework
+crewai
+crewai-tools

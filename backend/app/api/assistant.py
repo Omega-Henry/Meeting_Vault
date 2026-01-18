@@ -47,22 +47,30 @@ async def query_assistant(
             "tool_outputs": []
         }
     
-    # Prepare state
-    initial_state = {
-        "messages": [HumanMessage(content=request.query)],
-        "user_id": user.id,
-        "intent": "",
-        "tool_calls": [],
-        "tool_outputs": [],
-        "final_response": {}
-    }
-    
-    # Run graph with config injecting the client
-    config = {"configurable": {"supabase_client": client}}
-    
+    # Run CrewAI Agent
     try:
-        result = await app_graph.ainvoke(initial_state, config=config)
-        return result["final_response"]
+        from app.services.crew_agent import run_crew_search
+        
+        # We need to run this in a threadpool because CrewAI is synchronous by default (or the tools might be)
+        # Fastapi async routes shouldn't block.
+        # But for now we can just await it if we wrap it or just use it directly if it's fast enough.
+        # Actually, let's just call it.
+        
+        response = run_crew_search(request.query, client)
+        
+        # Map to legacy frontend format for now, or new format if we updated frontend
+        # The frontend expects { assistant_text: string, ui: { intent: string, data: any, count: number } }
+        
+        return {
+            "assistant_text": response.text,
+            "ui": {
+                "intent": "search_contacts" if response.ui_cards else "chat",
+                "data": response.ui_cards, # Frontend handles list of generic objects?
+                "count": len(response.ui_cards),
+                "suggestions": response.suggestions 
+            }
+        }
+        
     except Exception as e:
         # Log error
         print(f"Agent error: {e}")

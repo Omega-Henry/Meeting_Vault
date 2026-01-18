@@ -40,7 +40,7 @@ def search_contacts(client: Client, query: str) -> List[Dict[str, Any]]:
         # Supabase/Postgres simple ILIKE search
         # For more complex search we'd use full text search
         res = client.table("contacts")\
-            .select("*, profile:contact_profiles(*)")\
+            .select("*, profile:contact_profiles(*), services(*)")\
             .or_(f"name.ilike.%{query}%,email.ilike.%{query}%,phone.ilike.%{query}%")\
             .limit(20)\
             .execute()
