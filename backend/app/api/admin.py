@@ -551,12 +551,23 @@ def merge_contacts(
     if updates:
         client.table("contacts").update(updates).eq("id", primary_id).execute()
 
-    # 4.5 Apply merged name if provided
+    # 4.5 Apply merged fields if provided
+    merged_updates = {}
     if request.merged_name and request.merged_name.strip():
-        client.table("contacts").update({"name": request.merged_name.strip()}).eq("id", primary_id).execute()
+        merged_updates["name"] = request.merged_name.strip()
+    if hasattr(request, 'merged_email') and request.merged_email:
+        merged_updates["email"] = request.merged_email.strip()
+    if hasattr(request, 'merged_phone') and request.merged_phone:
+        merged_updates["phone"] = request.merged_phone.strip()
+    
+    if merged_updates:
+        client.table("contacts").update(merged_updates).eq("id", primary_id).execute()
 
-    # 5. Archive Duplicates
-    client.table("contacts").update({"is_archived": True}).in_("id", dup_ids).execute()
+    # 5. DELETE Duplicates (not archive) - clean database
+    # First delete their profiles
+    client.table("contact_profiles").delete().in_("contact_id", dup_ids).execute()
+    # Then delete the contacts themselves
+    client.table("contacts").delete().in_("id", dup_ids).execute()
 
     # 6. Audit
     try:
@@ -566,7 +577,7 @@ def merge_contacts(
             "entity_id": primary_id,
             "action": "merged",
             "actor_id": ctx.user.id,
-            "changes": {"merged_ids": dup_ids, "transferred_ownership": str(new_owner)}
+            "changes": {"merged_ids": dup_ids, "deleted": True}
         }).execute()
     except Exception:
         pass
