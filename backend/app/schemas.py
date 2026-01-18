@@ -112,6 +112,15 @@ class MergeRequest(BaseModel):
     merged_email: Optional[str] = None
     merged_phone: Optional[str] = None
 
+class MergeProposal(BaseModel):
+    name: str
+    email: Optional[str] = None
+    phone: Optional[str] = None
+    bio: Optional[str] = None
+    hot_plate: Optional[str] = None
+    role_tags: List[str] = []
+    reasoning: str = Field(description="Explanation of why these values were chosen")
+
 # New Schemas for Claims and Requests
 
 class ClaimRequestCreate(BaseModel):

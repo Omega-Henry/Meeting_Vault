@@ -183,7 +183,7 @@ export default function DatabaseEditor() {
             }
             if (!value) {
                 for (const c of others) {
-                    const v = c[field] as string || c.profile?.[profileField]
+                    const v = (c[field] as string) || (c.profile?.[profileField || ''] as string)
                     if (v) { value = v; break }
                 }
             }
@@ -497,7 +497,46 @@ export default function DatabaseEditor() {
                                     {/* Step 1: Compare Profiles */}
                                     {mergeStep === 1 && (
                                         <div>
-                                            <p className="text-sm text-muted-foreground mb-4">Select the <strong>primary contact</strong> to keep. The other will be deleted after merging.</p>
+                                            <div className="flex justify-between items-center mb-4">
+                                                <p className="text-sm text-muted-foreground">Select the <strong>primary contact</strong> to keep. The other will be deleted after merging.</p>
+                                                <button
+                                                    onClick={async () => {
+                                                        setLoadingMergeData(true)
+                                                        try {
+                                                            const { data: { session } } = await supabase.auth.getSession()
+                                                            const res = await fetch(`${import.meta.env.VITE_API_BASE_URL || ''}/api/admin/contacts/suggest-merge`, {
+                                                                method: 'POST',
+                                                                headers: { 'Authorization': `Bearer ${session?.access_token}`, 'Content-Type': 'application/json' },
+                                                                body: JSON.stringify({ contact_ids: mergeContacts.map(c => c.id) })
+                                                            })
+
+                                                            if (res.ok) {
+                                                                const suggestion = await res.json()
+                                                                setMergedData({
+                                                                    name: suggestion.name,
+                                                                    email: suggestion.email || '',
+                                                                    phone: suggestion.phone || '',
+                                                                    bio: suggestion.bio || '',
+                                                                    hot_plate: suggestion.hot_plate || '',
+                                                                    role_tags: suggestion.role_tags || []
+                                                                })
+                                                                setMergeStep(2)
+                                                                alert(`AI Proposal: ${suggestion.reasoning}`)
+                                                            } else {
+                                                                alert("Failed to generate AI suggestion")
+                                                            }
+                                                        } catch (e) {
+                                                            console.error(e)
+                                                            alert("Error generating suggestion")
+                                                        } finally {
+                                                            setLoadingMergeData(false)
+                                                        }
+                                                    }}
+                                                    className="text-xs bg-purple-100 text-purple-700 hover:bg-purple-200 px-3 py-1.5 rounded-full flex items-center gap-1 transition-colors border border-purple-200"
+                                                >
+                                                    <Sparkles className="h-3 w-3" /> Smart Merge (AI)
+                                                </button>
+                                            </div>
                                             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                                                 {mergeContacts.map((contact) => (
                                                     <ProfileDetail key={contact.id} contact={contact} isSelected={primaryContactId === contact.id} onSelect={() => handlePrimaryChange(contact.id)} />

@@ -3,13 +3,13 @@ from pydantic import BaseModel
 from typing import List, Dict, Any, Optional
 from supabase import Client
 from app.dependencies import require_admin, UserContext, get_supabase_client, get_service_role_client
-from app.schemas import MergeSuggestion, MergeRequest
+from app.schemas import MergeSuggestion, MergeRequest, MergeProposal
 import uuid
 import logging
 from collections import defaultdict
 import datetime
 import asyncio
-from app.services.hybrid_extraction import enrich_profile_from_services_with_llm
+from app.services.hybrid_extraction import enrich_profile_from_services_with_llm, generate_merge_suggestion
 from app.core.config import settings
 from rapidfuzz import fuzz
 
@@ -760,3 +760,42 @@ def update_service(
     client.table("services").update(update_data).eq("id", service_id).execute()
     return {"status": "success"}
 
+
+class SuggestMergeRequest(BaseModel):
+    contact_ids: List[str]
+
+@router.post("/contacts/suggest-merge", response_model=MergeProposal)
+def suggest_merge(
+    request: SuggestMergeRequest,
+    ctx: UserContext = Depends(require_admin),
+    client: Client = Depends(get_supabase_client)
+):
+    """
+    Analyzes a list of contacts and suggests the best merged profile using AI.
+    """
+    if len(request.contact_ids) < 2:
+        raise HTTPException(status_code=400, detail="At least 2 contacts required for merge suggestion")
+
+    # Fetch full contact data + profiles
+    res = client.table("contacts").select("*, services(*), profile:contact_profiles(*)").in_("id", request.contact_ids).execute()
+    contacts = res.data
+    
+    if len(contacts) < 2:
+        raise HTTPException(status_code=404, detail="Contacts not found")
+
+    # Add service count metadata for the LLM
+    for c in contacts:
+        c["services_count"] = len(c.get("services") or [])
+    
+    # Generate suggestion
+    result = generate_merge_suggestion(contacts)
+    
+    return MergeProposal(
+        name=result.master_name,
+        email=result.master_email,
+        phone=result.master_phone,
+        bio=result.combined_bio,
+        hot_plate=result.combined_hot_plate,
+        role_tags=result.all_role_tags,
+        reasoning=result.reasoning
+    )

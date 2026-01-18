@@ -579,3 +579,73 @@ async def extract_summary_with_llm(text: str) -> MeetingSummary:
     except Exception as e:
         logger.error(f"Summary Generation Failed: {e}")
         return MeetingSummary(summary="Summary generation failed.", key_topics=[])
+
+# =============================================================================
+# AI MERGE PROPOSAL
+# =============================================================================
+
+class MergedProfileResult(BaseModel):
+    master_name: str = Field(description="The most professional/complete name")
+    master_email: Optional[str] = Field(None, description="The best email address")
+    master_phone: Optional[str] = Field(None, description="The best phone number")
+    combined_bio: Optional[str] = Field(None, description="A synthesized bio combining unique facts")
+    combined_hot_plate: Optional[str] = Field(None, description="Synthesized hot plate/ask")
+    all_role_tags: List[str] = Field(default_factory=list, description="Union of all role tags")
+    reasoning: str = Field(description="Why this name/email was chosen")
+
+def generate_merge_suggestion(contacts: List[Dict]) -> MergedProfileResult:
+    """
+    Uses LLM to propose a 'Golden Record' from a list of duplicate contacts.
+    """
+    if not contacts:
+        return MergedProfileResult(master_name="Unknown", reasoning="No contacts provided")
+
+    # Serialize contacts for LLM
+    contacts_str = ""
+    for i, c in enumerate(contacts):
+        profile = c.get("profile", {}) or {}
+        # Handle case where profile is a list (result of join)
+        if isinstance(profile, list):
+            profile = profile[0] if profile else {}
+            
+        contacts_str += f"""
+Contact {i+1}:
+- Name: {c.get('name')}
+- Email: {c.get('email')}
+- Phone: {c.get('phone')}
+- Bio: {profile.get('bio')}
+- Hot Plate: {profile.get('hot_plate')}
+- Role Tags: {profile.get('role_tags')}
+- Services: {c.get('services_count', 'unknown')}
+-------------------
+"""
+
+    prompt = f"""
+    You are an expert Data Steward. I have {len(contacts)} duplicate contact records that need to be merged into one "Golden Record".
+    
+    Here are the duplicates:
+    {contacts_str}
+    
+    Your task:
+    1. Pick the BEST Name: Prefer full names over nicknames (e.g. "Jonathan Doe" > "John"). Avoid "Unattributed".
+    2. Pick the BEST Email: Prefer professional/work emails over generic ones.
+    3. Pick the BEST Phone: Prefer mobile/cell if distinguishable.
+    4. Synthesize a Bio: Combine distinct professional details from all bios. Keep it concise.
+    5. Synthesize a Hot Plate: Combine unique "asks" or offering details.
+    6. Union Role Tags: Remove duplicates, keep all relevant tags.
+    
+    Return the result in structured JSON.
+    """
+    
+    try:
+        llm = get_structured_llm(MergedProfileResult)
+        result = invoke_with_retry(llm, prompt)
+        return result
+    except Exception as e:
+        logger.error(f"Error generating merge suggestion: {e}")
+        # Fallback to simple max selection
+        best_name = max([c.get("name") or "" for c in contacts], key=len)
+        return MergedProfileResult(
+            master_name=best_name,
+            reasoning="LLM Failed, used fallback heuristics"
+        )
