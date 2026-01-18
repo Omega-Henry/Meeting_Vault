@@ -203,10 +203,12 @@ def get_pending_claims(
     if not membership.data or membership.data[0].get("role") != "admin":
         raise HTTPException(status_code=403, detail="Admin access required")
     
+    # Note: Can't join auth.users directly via PostgREST - just get claim data with contact info
     res = client.table("claim_requests")\
-        .select("*, contact:contacts(id, name, email, phone), user:auth.users(email)")\
+        .select("*, contact:contacts(id, name, email, phone)")\
         .eq("status", "pending")\
         .order("created_at", desc=True)\
         .execute()
     
     return res.data
+
