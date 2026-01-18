@@ -1,5 +1,5 @@
 import { Routes, Route } from 'react-router-dom'
-import { LayoutDashboard, MessageSquare, Users, Link as LinkIcon, Search, CheckSquare, Database, Briefcase, ScrollText } from 'lucide-react'
+import { LayoutDashboard, MessageSquare, Users, CheckSquare, Database, Briefcase, ScrollText } from 'lucide-react'
 import AssistantPanel from '../components/AssistantPanel'
 import ChatList from '../pages/ChatList'
 import ChatDetail from '../pages/ChatDetail'
@@ -23,11 +23,9 @@ export default function AdminLayout() {
         { name: 'Chats', href: '/admin/chats', icon: MessageSquare },
         { name: 'Requests', href: '/admin/requests', icon: CheckSquare },
         { name: 'Services', href: '/admin/services', icon: Briefcase },
-        { name: 'Links', href: '/admin/links', icon: LinkIcon },
         { name: 'Database', href: '/admin/database', icon: Database },
         { name: 'Audit Logs', href: '/admin/audit', icon: ScrollText },
         { name: 'Feedback', href: '/admin/feedback', icon: MessageSquare },
-        { name: 'Search', href: '/admin/search', icon: Search },
     ]
 
     return (

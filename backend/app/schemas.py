@@ -108,6 +108,7 @@ class MergeSuggestion(BaseModel):
 class MergeRequest(BaseModel):
     primary_contact_id: str
     duplicate_contact_ids: List[str]
+    merged_name: Optional[str] = None  # Optional: allows admin to set final name
 
 # New Schemas for Claims and Requests
 

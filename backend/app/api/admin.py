@@ -551,6 +551,10 @@ def merge_contacts(
     if updates:
         client.table("contacts").update(updates).eq("id", primary_id).execute()
 
+    # 4.5 Apply merged name if provided
+    if request.merged_name and request.merged_name.strip():
+        client.table("contacts").update({"name": request.merged_name.strip()}).eq("id", primary_id).execute()
+
     # 5. Archive Duplicates
     client.table("contacts").update({"is_archived": True}).in_("id", dup_ids).execute()
 
